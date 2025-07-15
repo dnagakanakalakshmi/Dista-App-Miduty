@@ -22,7 +22,16 @@ api_version = "2025-07"
 scopes = "read_all_orders,read_checkouts,read_customers,read_orders,read_payment_customizations,read_products,read_translations,read_validations,write_checkouts,write_payment_customizations,write_products,write_validations"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [
+  "https://dista-app-miduty.onrender.com/auth/callback",
+  "https://dista-app-miduty.onrender.com/auth/shopify/callback",
+  "https://dista-app-miduty.onrender.com/api/auth/callback"
+]
+
+[app_proxy]
+url = "https://dista-app-miduty.onrender.com"
+subpath = "rvpp"
+prefix = "a"
 
 [pos]
 embedded = false
