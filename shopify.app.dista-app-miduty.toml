@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "679d92498860603e73848979cad25e87"
-application_url = "https://example.com/"
+application_url = "https://dista-app-miduty.onrender.com"
 embedded = true
 name = "Dista App - Miduty"
 handle = "dista-app-miduty"
