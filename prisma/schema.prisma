@@ -1,0 +1,85 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+}
+
+model CustomCSS {
+  id              String   @id @default(cuid())
+  shop            String   @unique
+  css             String
+  showAddToCart   Boolean  @default(true)
+  showBuyNow      Boolean  @default(true)
+  displayMode     String   @default("carousel")
+  productsPerRow  Int      @default(3)
+  initialProducts Int      @default(6)
+  cardLayout      String   @default("default") // New field to store card layout type
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model CustomCSS_RO {
+  id              String   @id @default(cuid())
+  shop            String   @unique
+  css             String
+  showAddToCart   Boolean  @default(true)
+  showReorder     Boolean  @default(true)
+  displayMode     String   @default("carousel")
+  productsPerRow  Int      @default(3)
+  initialProducts Int      @default(6)
+  cardLayout      String   @default("default")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ApiCredentials {
+  id      String @id @default(cuid()) // Unique identifier for each token
+  token   String // The bearer token
+  baseUrl String // The base URL of the API
+  createdAt DateTime @default(now()) // Timestamp for when the token was created
+  updatedAt DateTime @updatedAt // Timestamp for when the token was last updated
+}
+
+model QuickViewCss {
+  id        Int      @id @default(autoincrement())
+  shop      String   @unique
+  css       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model widgetSettings {
+  id         Int      @id @default(autoincrement())
+  shop       String
+  starsText  String   @default("{count} review/reviews")
+  saveText   String   @default("Save {percent}%")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}

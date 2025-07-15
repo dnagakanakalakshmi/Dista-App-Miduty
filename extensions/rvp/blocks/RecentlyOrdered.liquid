@@ -1,0 +1,538 @@
+{% comment %} recently-ordered/extensions/recently-ordered/blocks/RecentlyOrdered.liquid {% endcomment %}
+
+{%- if customer -%}
+  {%- assign uid = customer.id | hmac_sha256: 'Polina' -%}
+
+  <link rel="stylesheet" href="{{ 'RecentlyOrdered.css' | asset_url }}">
+
+  <div
+    class="layout__boxed recently-ordered-root recently-ordered-container"
+    style="opacity: 0; pointer-events: none; transition: opacity 0.3s;"
+    data-section-id="{{ section.id }}"
+    data-show-add-to-cart="{{ settings.show_add_to_cart }}"
+    data-show-reorder="{{ settings.show_reorder }}"
+    data-display-mode="{{ settings.displayMode }}"
+    data-products-per-row="{{ settings.productsPerRow }}"
+    data-initial-products="{{ settings.initialProducts }}"
+    data-card-layout="{{ settings.cardLayout }}"
+    data-currency="{{ localization.country.currency.iso_code }}"
+  >
+    <div class="ro-heading" style="display: none;">{{ block.settings['ro-title'] }}</div>
+
+    <div class="recently-ordered-carousel-wrapper" style="display: none;">
+      <button class="recently-ordered-carousel-prev" aria-label="Previous products">❮</button>
+      <div class="recently-ordered-carousel"><!-- Products will be injected here --></div>
+      <button class="recently-ordered-carousel-next" aria-label="Next products">❯</button>
+    </div>
+
+    <div class="recently-ordered-grid" style="display: none;"><!-- Products will be injected here --></div>
+
+    <div class="recently-ordered-show-more-container" style="display: none;">
+      <button class="recently-ordered-show-more-button">Show More</button>
+    </div>
+  </div>
+
+  <template id="product-card-template-ro">
+    {% render 'product-card-RO',
+      cardLayout: 'vertical',
+      add_to_cart_text: block.settings.add_to_cart_text,
+      reorder_text: block.settings.reorder_text
+    %}
+    <script>
+      function processProductCardCSS(css) {
+        return css
+          .split('\n')
+          .filter((line) => line.includes('.recently-ordered-card'))
+          .join('\n');
+      }
+
+      function applyCustomCSS() {
+        const customCSS = document.querySelector('.recently-ordered-custom-css');
+        if (!customCSS) return;
+
+        const styleElement = document.createElement('style');
+        styleElement.textContent = processProductCardCSS(customCSS.textContent);
+        styleElement.id = 'recently-ordered-custom-css-injected';
+        document.head.appendChild(styleElement);
+      }
+
+      document.addEventListener('DOMContentLoaded', applyCustomCSS);
+    </script>
+  </template>
+
+  <script>
+    window.money_format = "{{ shop.money_with_currency_format }}";
+  </script>
+  <script src="{{ 'currency.js' | asset_url }}" defer></script>
+
+  <script>
+    // Utility Functions
+    window.RecentlyOrderedUtils = {
+      moneyFormat: "{{ shop.money_with_currency_format }}",
+      
+      processCSS(css) {
+        return css.split('\n').filter(line => {
+          return line.includes('.recently-ordered-container') ||
+                line.includes('.recently-ordered-carousel') ||
+                line.includes('.recently-ordered-grid') ||
+                !line.trim().startsWith('.recently-ordered-card');
+        }).join('\n');
+      },
+      
+      resetButtons() {
+        document.querySelectorAll('[data-reorder], [data-add-to-cart]').forEach(button => {
+          const isReorder = button.getAttribute('aria-label')?.includes('Reorder');
+          button.disabled = false;
+          button.innerHTML = `<span>${isReorder ? 'Reorder' : 'Add to Cart'}</span>`;
+        });
+      },
+
+      // Helper to extract numeric ID from Shopify GID
+      extractNumericId(id) {
+        if (!id) return '';
+        if (/^\d+$/.test(id)) return String(id);
+        const match = id.match(/(\d+)$/);
+        return match ? match[1] : String(id);
+      },
+
+    };
+
+    class ProductCardRenderer {
+      constructor(settings, template, widgetSettings) {
+        this.settings = settings;
+        this.template = template;
+        this.widgetSettings = widgetSettings;
+        this.cardLayout = settings.cardLayout || 'vertical';
+      }
+      createCard(product) {
+
+
+        if (!this.template?.content) {
+          console.error('Product card template not found');
+          return null;
+        }
+
+        const card = this.template.content.cloneNode(true);
+        const cardEl = card.querySelector('.recently-ordered-card');
+
+        if (!cardEl) {
+          console.error('Card element not found in template');
+          return null;
+        }
+        
+        this.setupCardLayout(cardEl);
+        this.setupProductData(cardEl, product);
+        
+        return card;
+      }
+      
+      setupCardLayout(cardEl) {
+        if (!cardEl) return;
+        if (this.cardLayout === 'horizontal') {
+          cardEl.classList.add('recently-ordered-card--horizontal');
+          cardEl.setAttribute('data-card-layout', 'horizontal');
+        } else {
+          cardEl.classList.remove('recently-ordered-card--horizontal');
+          cardEl.setAttribute('data-card-layout', 'vertical');
+        }
+        
+        cardEl.style.setProperty('--show-add-to-cart', this.settings.showAddToCart ? 'block' : 'none');
+        cardEl.style.setProperty('--show-reorder', this.settings.showReorder ? 'block' : 'none');
+      }
+      
+      setupProductData(cardEl, product) {
+        const { presentmentPrice, presentmentCompareAtPrice } = product.variants[0];
+        
+        // Basic product info
+        if (cardEl.querySelector('.recently-ordered-image-link')) {
+          cardEl.querySelector('.recently-ordered-image-link').href = product.url;
+        }
+        if (cardEl.querySelector('.recently-ordered-title')) {
+          cardEl.querySelector('.recently-ordered-title').href = product.url;
+          cardEl.querySelector('.recently-ordered-title').textContent = product.title || '';
+        }
+        if (cardEl.querySelector('.recently-ordered-image')) {
+          cardEl.querySelector('.recently-ordered-image').src = product.image || '';
+        }
+
+
+        const atcBtn = cardEl.querySelector('.recently-ordered-atc-button');
+        if (atcBtn) {
+          const numericID = window.RecentlyOrderedUtils.extractNumericId(product.id);
+          atcBtn.setAttribute('data-product-card-swatch-id', numericID);
+          atcBtn.href = product.url;
+        }
+
+        // Setup quick view buttons
+        const quickViewButtons = cardEl.querySelectorAll('.quick-view-btn');
+        const hasRealVariants =
+          product.variants && product.variants.length > 1
+          || (product.variants && product.variants.length === 1 && product.variants[0].title !== 'Default Title');
+        quickViewButtons.forEach(btn => {
+          btn.setAttribute('data-product', JSON.stringify(product));
+          btn.setAttribute('data-title', encodeURIComponent(product.title));
+          btn.setAttribute('data-has-variants', hasRealVariants ? 'true' : 'false');
+        });
+
+        // Check if all variants are unavailable
+        const allVariantsUnavailable = !product.variants?.some(v => v.availableForSale);
+
+        // Disable Add to Cart and Reorder buttons if all variants are unavailable
+        if (allVariantsUnavailable) {
+          const atcBtn = cardEl.querySelector('.recently-ordered-atc-button');
+          const reorderBtn = cardEl.querySelector('.recently-ordered-reorder-button');
+          if (atcBtn) {
+            atcBtn.disabled = true;
+            atcBtn.querySelector('.recently-ordered-atc-button-text').innerHTML = 'Sold Out';
+            atcBtn.style.opacity = '0.5';
+            atcBtn.style.pointerEvents = 'none';
+          }
+          if (reorderBtn) {
+            reorderBtn.disabled = true;
+            reorderBtn.querySelector('.recently-ordered-reorder-button-text').innerHTML = 'Sold Out';
+            reorderBtn.style.opacity = '0.5';
+            reorderBtn.style.pointerEvents = 'none';
+          }
+        }
+        
+        // Pricing
+        const priceEl = cardEl.querySelector('.recently-ordered-price');
+        if (priceEl) {
+          const formattedPrice = parseFloat(presentmentPrice).toFixed(2);
+          priceEl.textContent = window.CurrencyUtils.formatMoneyCurrency(String(formattedPrice), window.money_format);
+        }
+        
+        // Compare price
+        const comparePriceEl = cardEl.querySelector('.recently-ordered-compare-price');
+        if (comparePriceEl) {
+          const compareAtPrice = parseFloat(presentmentCompareAtPrice || 0);
+          const price = parseFloat(presentmentPrice || 0);
+          
+          if (compareAtPrice > price) {
+            const formattedPrice = parseFloat(presentmentCompareAtPrice).toFixed(2);
+            comparePriceEl.textContent = window.CurrencyUtils.formatMoneyCurrency(String(formattedPrice), window.money_format);
+            comparePriceEl.style.display = 'inline';
+          } else {
+            comparePriceEl.style.display = 'none';
+          }
+        }
+        
+        // Discount badge
+        const saveBadgeEl = cardEl.querySelector('.recently-ordered-badge');
+        if (saveBadgeEl) {
+          const compareAtPrice = parseFloat(presentmentCompareAtPrice);
+          const price = parseFloat(presentmentPrice);
+          const discount = Math.round(((compareAtPrice - price) / compareAtPrice) * 100);
+          
+          if (!isNaN(discount) && discount > 0) {
+            // Use custom save text from widget settings and wrap discount (and % if present) in a div, preserving whitespace
+            const saveText = this.widgetSettings.saveText || 'Save {percent}%';
+            const parts = saveText.split('{percent}');
+            let after = parts[1] || '';
+            let symbol = '';
+            if (after.startsWith('%')) {
+              symbol = '%';
+              after = after.slice(1);
+            }
+            saveBadgeEl.innerHTML = `${parts[0]}<div class="recently-ordered-discount-value">${discount}${symbol}</div>${after}`;
+            saveBadgeEl.style.display = 'flex';
+            saveBadgeEl.style.flexDirection = 'row';
+            saveBadgeEl.style.whiteSpace = 'pre';
+          } else {
+            saveBadgeEl.style.display = 'none';
+          }
+        }
+        
+        // Ratings
+
+        if (cardEl.querySelector('.recently-ordered-reviews-link')) {
+          cardEl.querySelector('.recently-ordered-reviews-link').href = product.url;
+        }
+        
+        const ratingStars = cardEl.querySelector('.recently-ordered-stars');
+        const ratingCount = cardEl.querySelector('.recently-ordered-review-count');
+        const count = product.ratingCount;
+
+        if (ratingStars && product.rating > 0) {
+          ratingStars.style.setProperty('--rating', product.rating);
+          ratingStars.parentElement.classList.add('visible');
+          ratingStars.parentElement.style.visibility = 'visible';
+          
+          const starsText = this.widgetSettings.starsText || '{count} review/reviews';
+          const formattedStarsText = starsText.replace('{count}', count);
+          
+          if (ratingCount) {
+            ratingCount.textContent = formattedStarsText;
+          }
+        } else if (ratingStars) {
+          ratingStars.parentElement.style.visibility = 'hidden';
+          ratingStars.parentElement.classList.remove('visible');
+        }
+        
+        
+      }
+    }
+
+    // Carousel Controller
+    class CarouselController {
+      constructor(carousel, prevBtn, nextBtn, cardLayout) {
+        this.carousel = carousel;
+        this.prevBtn = prevBtn;
+        this.nextBtn = nextBtn;
+        this.cardLayout = cardLayout;
+        this.currentIndex = 0;
+        this.cards = [];
+        this.gap = 20;
+        
+        this.init();
+      }
+      
+      init() {
+        this.cards = Array.from(this.carousel.querySelectorAll('.recently-ordered-card'));
+        if (this.cards.length === 0) return;
+        
+        this.cardWidth = this.cards[0].offsetWidth;
+        this.containerWidth = this.carousel.parentElement.offsetWidth;
+        this.maxIndex = this.calculateMaxIndex();
+        
+        this.prevBtn.addEventListener('click', () => this.navigate(-1));
+        this.nextBtn.addEventListener('click', () => this.navigate(1));
+        
+        const resizeObserver = new ResizeObserver(() => {
+          this.cardWidth = this.cards[0]?.offsetWidth || this.cardWidth;
+          this.containerWidth = this.carousel.parentElement.offsetWidth;
+          this.maxIndex = this.calculateMaxIndex();
+          this.updateCarousel();
+        });
+        
+        resizeObserver.observe(this.carousel.parentElement);
+        this.updateCarousel();
+      }
+      
+      calculateMaxIndex() {
+        const totalWidth = this.cardWidth + this.gap;
+        const visibleCards = Math.floor((this.containerWidth + this.gap) / totalWidth);
+        return Math.max(0, this.cards.length - visibleCards);
+      }
+      
+      navigate(direction) {
+        this.currentIndex += direction;
+        this.updateCarousel();
+      }
+      
+      updateCarousel() {
+        this.currentIndex = Math.max(0, Math.min(this.currentIndex, this.maxIndex));
+        const offset = -this.currentIndex * (this.cardWidth + this.gap);
+        this.carousel.style.transform = `translateX(${offset}px)`;
+        
+        const isMobile = window.innerWidth <= 480;
+        const isHorizontal = this.cardLayout === 'horizontal';
+
+        
+        if (isMobile && isHorizontal) {
+          this.nextBtn.style.display = this.currentIndex === this.maxIndex - 1 ? 'none' : 'flex';
+        } else {
+          this.nextBtn.style.display = this.currentIndex === this.maxIndex ? 'none' : 'flex';
+        }
+        
+        this.prevBtn.style.display = this.currentIndex <= 0 ? 'none' : 'flex';
+      }
+    }
+
+    // Main Recently Ordered Controller
+    class RecentlyOrderedController {
+      static async init() {
+        if (!{{ customer.id }}) return;
+        
+        const controller = new RecentlyOrderedController();
+        await controller.setup();
+      }
+      
+      constructor(container) {
+        this.container = container;
+        this.carouselWrapper = container.querySelector('.recently-ordered-carousel-wrapper');
+        this.carousel = container.querySelector('.recently-ordered-carousel');
+        this.grid = container.querySelector('.recently-ordered-grid');
+        this.showMoreContainer = container.querySelector('.recently-ordered-show-more-container');
+        this.showMoreButton = container.querySelector('.recently-ordered-show-more-button');
+        this.prevBtn = container.querySelector('.recently-ordered-carousel-prev');
+        this.nextBtn = container.querySelector('.recently-ordered-carousel-next');
+        this.template = document.getElementById('product-card-template-ro');
+        this.title = container.querySelector('.ro-heading');
+    
+        this.currentlyShown = 0;
+        this.products = [];
+        this.settings = {};
+      }
+      
+      async setup() {
+        try {
+          await this.fetchProducts();
+          await this.fetchCSS();
+          this.setupDisplay();
+          this.renderInitialProducts();
+          this.setupShowMore();
+        } catch (error) {
+          console.error('Recently Ordered Products Error:', error);
+          this.container.innerHTML = '<p class="error-message">Faileeeeed to load products. Please refresh the page.</p>';
+        }
+      }
+      
+      async fetchProducts() {
+        const currency = this.container.dataset.currency;
+        const storeUrl = '{{ shop.permanent_domain }}';
+        const response = await fetch(`/a/rvpp/app/apishopifyRO?customerId={{ customer.id }}&uid={{ uid }}&storeUrl=${storeUrl}&currency=${currency}`);
+        const { products, settings, widgetSettings } = await response.json();
+        
+        this.products = products;
+        this.settings = {
+          ...settings,
+          showAddToCart: settings?.showAddToCart ?? true,
+          showReorder: settings?.showReorder ?? true,
+          displayMode: settings?.displayMode || 'carousel',
+          cardLayout: settings?.cardLayout || 'vertical',
+          productsPerRow: settings?.productsPerRow || 3,
+          initialProducts: settings?.initialProducts || 6,
+          widgetSettings: {
+            starsText: widgetSettings?.starsText || '{count} review/reviews',
+            saveText: widgetSettings?.saveText || 'Save {percent}%'
+          }
+        };
+
+        
+        if (this.products.length > 0) {
+          this.container.style.opacity = '1';
+          this.container.style.pointerEvents = 'auto';
+          this.title.style.display = 'block';
+        }
+      }
+      
+      async fetchCSS() {
+        if (this.settings.css) {
+          document.getElementById('recently-ordered-custom-css-api')?.remove();
+          
+          const styleElement = document.createElement('style');
+          styleElement.textContent = this.settings.css;
+          styleElement.id = 'recently-ordered-custom-css-api';
+          document.head.appendChild(styleElement);
+        }
+
+      }
+      
+      setupDisplay() {
+        this.container.setAttribute('data-display-mode', this.settings.displayMode);
+        this.container.setAttribute('data-card-layout', this.settings.cardLayout);
+        this.container.setAttribute('data-products-per-row', this.settings.productsPerRow);
+        this.container.setAttribute('data-initial-products', this.settings.initialProducts);
+        this.container.setAttribute('data-show-add-to-cart', this.settings.showAddToCart);
+        this.container.setAttribute('data-show-reorder', this.settings.showReorder);
+        
+        if (this.grid) {
+          this.grid.setAttribute('data-products-per-row', this.settings.productsPerRow);
+        }
+        
+        if (this.settings.displayMode === 'carousel') {
+          this.carouselWrapper.style.display = 'block';
+          this.grid.style.display = 'none';
+        } else {
+          this.carouselWrapper.style.display = 'none';
+          this.grid.style.display = 'grid';
+        }
+      }
+      
+      renderInitialProducts() {
+
+        const targetContainer = this.settings.displayMode === 'carousel' ? this.carousel : this.grid;
+        targetContainer.innerHTML = ''; // Clear the container
+
+        const productsToShow = this.settings.displayMode === 'grid'
+          ? Math.min(this.products.length, this.settings.initialProducts)
+          : this.products.length;
+
+        this.currentlyShown = productsToShow;
+
+        const cardRenderer = new ProductCardRenderer(this.settings, this.template, this.settings.widgetSettings);
+        this.products.slice(0, productsToShow).forEach(product => {
+          targetContainer.appendChild(cardRenderer.createCard(product));
+        });
+
+        if (this.settings.displayMode === 'carousel') {
+          new CarouselController(this.carousel, this.prevBtn, this.nextBtn, this.settings.cardLayout);
+        }
+      }
+      
+      setupShowMore() {
+        if (this.settings.displayMode !== 'grid' || this.products.length <= this.currentlyShown) {
+          this.showMoreContainer.style.display = 'none';
+          return;
+        }
+        
+        this.showMoreContainer.style.display = 'block';
+        this.showMoreButton.addEventListener('click', () => this.loadMoreProducts());
+      }
+      
+      loadMoreProducts() {
+        const additionalProducts = Math.min(
+          this.products.length - this.currentlyShown, 
+          this.settings.initialProducts
+        );
+        
+        if (additionalProducts <= 0) return;
+        
+        const cardRenderer = new ProductCardRenderer(this.settings, this.template, this.settings.widgetSettings);
+        this.products.slice(this.currentlyShown, this.currentlyShown + additionalProducts)
+          .forEach(product => {
+            this.grid.appendChild(cardRenderer.createCard(product));
+          });
+        
+        this.currentlyShown += additionalProducts;
+        
+        if (this.currentlyShown >= this.products.length) {
+          this.showMoreContainer.style.display = 'none';
+        }
+      }
+    }
+
+    // Initialize the application
+    window.addEventListener('pageshow', window.RecentlyOrderedUtils.resetButtons);
+    document.addEventListener('DOMContentLoaded', () => {
+      const containers = document.querySelectorAll('.recently-ordered-container');
+      containers.forEach(container => {
+        const controller = new RecentlyOrderedController(container);
+        controller.setup();
+      });
+    });
+  </script>
+  
+{% endif %}
+
+{% schema %}
+{
+  "name": "Recently Ordered Products",
+  "target": "section",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Title"
+    },
+    {
+      "type": "text",
+      "id": "ro-title",
+      "label": "Title",
+      "default": "Recently Ordered Products"
+    },
+    {
+      "type": "text",
+      "id": "add_to_cart_text",
+      "label": "Add to Cart Button Text",
+      "default": "Add to Cart"
+    },
+    {
+      "type": "text",
+      "id": "reorder_text",
+      "label": "Reorder Button Text",
+      "default": "Reorder"
+    }
+  ]
+}
+{% endschema %}

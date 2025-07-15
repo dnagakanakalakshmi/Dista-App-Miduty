@@ -1,0 +1,355 @@
+{% assign timestamp = 'now' | date: '%s' %}
+{% assign random_salt = timestamp | append: shop.id | append: shop.domain | append: timestamp %}
+{% if customer %}
+  {%- assign uid = customer.id | hmac_sha256: 'Polina' -%}
+  {%- assign dynamic_customer_id = customer.id -%}
+{% else %}
+  {%- assign uid = random_salt | hmac_sha256: 'Polina' -%}
+  {%- assign dynamic_customer_id = random_salt -%}
+{% endif %}
+
+<link rel="stylesheet" href="{{ 'RecentlyViewed.css' | asset_url }}">
+
+<div
+  class="layout__boxed recently-viewed-root recently-viewed-container"
+  style="opacity: 0; pointer-events: none; transition: opacity 0.3s;"
+  data-section-id="{{ section.id }}"
+  data-show-add-to-cart="{{ settings.showAddToCart }}"
+  data-show-buy-now="{{ settings.showBuyNow }}"
+  data-display-mode="{{ settings.displayMode }}"
+  data-products-per-row="{{ settings.productsPerRow }}"
+  data-initial-products="{{ settings.initialProducts }}"
+  data-card-layout="{{ settings.cardLayout }}"
+  data-currency="{{ localization.country.currency.iso_code }}"
+  {% if product %}
+    data-current-product-id="{{ product.id }}"
+  {% endif %}
+>
+  <div class="rvp-heading" style="display: none;">{{ block.settings['rvp-title'] }}</div>
+  <div class="recently-viewed-carousel-wrapper" style="display: none;">
+    <button class="recently-viewed-carousel-prev" aria-label="Previous products">❮</button>
+    <div class="recently-viewed-carousel">
+      <!-- Products will be injected here -->
+    </div>
+    <button class="recently-viewed-carousel-next" aria-label="Next products">❯</button>
+  </div>
+  <div class="recently-viewed-grid" style="display: none;">
+    <!-- Products will be injected here -->
+  </div>
+  <div class="recently-viewed-show-more-container" style="display: none;">
+    <button class="recently-viewed-show-more-button">Show More</button>
+  </div>
+</div>
+
+<template id="product-card-template">
+  {% render 'product-card',
+    cardLayout: 'vertical',
+    add_to_cart_text: block.settings.add_to_cart_text,
+    buy_now_text: block.settings.buy_now_text
+  %}
+</template>
+
+<script src="{{ 'recentlyViewedUtils.js' | asset_url }}"></script>
+<script src="{{ 'currency.js' | asset_url }}"></script>
+<script src="{{ 'RecentlyViewedClasses.js' | asset_url }}"></script>
+
+<script>
+
+  // Recently Viewed App
+  class RecentlyViewedApp {
+    constructor(container) {
+      this.container = container;
+      this.carouselWrapper = container.querySelector('.recently-viewed-carousel-wrapper');
+      this.carousel = container.querySelector('.recently-viewed-carousel');
+      this.grid = container.querySelector('.recently-viewed-grid');
+      this.showMoreContainer = container.querySelector('.recently-viewed-show-more-container');
+      this.showMoreButton = container.querySelector('.recently-viewed-show-more-button');
+      this.prevBtn = container.querySelector('.recently-viewed-carousel-prev');
+      this.nextBtn = container.querySelector('.recently-viewed-carousel-next');
+      this.template = document.getElementById('product-card-template');
+      this.titleElement = container.querySelector('.rvp-heading');
+      this.currentProductId = this.container.dataset.currentProductId;
+
+      this.displayMode = 'carousel';
+      this.productsPerRow = 3;
+      this.initialProducts = 6;
+      this.showAddToCart = true;
+      this.showBuyNow = true;
+      this.currentlyShown = 0;
+      this.products = [];
+      this.settings = {};
+      this.widgetSettings = {};
+      this.carouselController = null;
+
+      window.money_format = '{{ shop.money_with_currency_format }}';
+    }
+
+    async init() {
+      await this.fetchRecentlyViewed();
+
+      if (this.titleElement) {
+        this.titleElement.textContent = this.container.dataset.rvpTitle || 'Recently Viewed Products';
+      }
+
+      if (this.displayMode === 'carousel') {
+        this.carouselWrapper.style.display = 'block';
+        this.grid.style.display = 'none';
+      } else {
+        this.carouselWrapper.style.display = 'none';
+        this.grid.style.display = 'grid';
+      }
+    }
+
+    async fetchRecentlyViewed() {
+      const customerId = '{{ dynamic_customer_id }}';
+      const storeUrl = '{{ shop.permanent_domain }}';
+      let sessionId = localStorage.getItem('recentlyViewedSessionId') || '';
+      const uid = '{{ uid }}';
+      let jwtToken = window.RecentlyViewedUtils.getCookie('jwt');
+      let globalToken = jwtToken;
+
+      // Initialize session ID if needed
+      if (customerId.length > 13 && !sessionId) {
+        sessionId = window.RecentlyViewedUtils.generateSessionId();
+        localStorage.setItem('recentlyViewedSessionId', sessionId);
+        localStorage.setItem('recentlyViewedSessionId2', sessionId);
+        localStorage.setItem('recentlyViewedSessionId3', sessionId);
+        document.cookie = 'jwt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+        jwtToken = null;
+        globalToken = null;
+      }
+
+      if (customerId.length == 13 && sessionId) {
+        document.cookie = 'jwt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+        jwtToken = null;
+        globalToken = null;
+      }
+
+      jwtToken = window.RecentlyViewedUtils.getCookie('jwt');
+      globalToken = jwtToken;
+
+      const currency = this.container.dataset.currency;
+      const displayURL = `/a/rvpp/app/apishopify?customerId=${customerId}&storeUrl=${storeUrl}&sessionId=${sessionId}&uid=${uid}&token=${
+        globalToken || ''
+      }&currency=${currency}&timestamp=${Date.now()}`;
+
+      try {
+        const response = await fetch(displayURL, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+
+        const data = await response.json();
+        if (data.token && !jwtToken) {
+          globalToken = data.token;
+          window.RecentlyViewedUtils.setCookie('jwt', data.token, 3.5);
+        }
+
+        if (customerId.length == 13 && sessionId) {
+          localStorage.removeItem('recentlyViewedSessionId');
+        }
+
+        this.processSettings(data);
+        this.processProducts(data);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        this.titleElement.style.display = 'none';
+      }
+    }
+
+    processSettings(data) {
+      if (data.settings) {
+        this.settings = {
+          displayMode: data.settings.displayMode || 'carousel',
+          productsPerRow: parseInt(data.settings.productsPerRow) || 3,
+          initialProducts: parseInt(data.settings.initialProducts) || 6,
+          showAddToCart: data.settings.showAddToCart ?? true,
+          showBuyNow: data.settings.showBuyNow ?? true,
+          cardLayout: data.settings.cardLayout || 'vertical',
+          css: data.settings.css,
+        };
+
+        this.container.dataset.displayMode = this.settings.displayMode;
+        this.container.dataset.cardLayout = this.settings.cardLayout;
+        this.container.dataset.productsPerRow = this.settings.productsPerRow;
+        this.container.dataset.initialProducts = this.settings.initialProducts;
+        this.container.dataset.showAddToCart = this.settings.showAddToCart;
+        this.container.dataset.showBuyNow = this.settings.showBuyNow;
+
+        this.updateDisplaySettings();
+        this.applyCustomCSS();
+      }
+
+      // Process widget settings
+      if (data.widgetSettings) {
+        this.widgetSettings = {
+          starsText: data.widgetSettings.starsText || '{count} review/reviews',
+          saveText: data.widgetSettings.saveText || 'Save {percent}%'
+        };
+      } else {
+        // Use default settings if widget settings not available
+        this.widgetSettings = {
+          starsText: '{count} review/reviews',
+          saveText: 'Save {percent}%'
+        };
+      }
+    }
+
+    updateDisplaySettings() {
+      this.displayMode = this.settings.displayMode;
+      this.productsPerRow = this.settings.productsPerRow;
+      this.initialProducts = this.settings.initialProducts;
+      this.showAddToCart = this.settings.showAddToCart;
+      this.showBuyNow = this.settings.showBuyNow;
+
+      if (this.displayMode === 'carousel') {
+        this.carouselWrapper.style.display = 'block';
+        this.grid.style.display = 'none';
+      } else {
+        this.carouselWrapper.style.display = 'none';
+        this.grid.style.display = 'grid';
+        this.grid.style.gridTemplateColumns = `repeat(${this.productsPerRow}, 1fr)`;
+      }
+    }
+
+    applyCustomCSS() {
+      if (!this.settings.css) return;
+
+      const existingStyle = document.getElementById('recently-viewed-custom-css-api');
+      if (existingStyle) existingStyle.remove();
+
+      const styleElement = document.createElement('style');
+      styleElement.textContent = this.settings.css;
+      styleElement.id = 'recently-viewed-custom-css-api';
+      document.head.appendChild(styleElement);
+    }
+
+    processProducts(data) {
+      let products = data.products || [];
+      if (this.currentProductId) {
+        products = products.filter((p) => window.RecentlyViewedUtils.extractNumericId(p.id) !== this.currentProductId);
+      }
+      this.products = products;
+
+      if (this.products.length > 0) {
+        // Show the container now that products are ready
+        this.container.style.opacity = '1';
+        this.container.style.pointerEvents = 'auto';
+
+        if (this.titleElement) {
+          this.titleElement.style.display = 'block';
+        }
+
+        this.renderProducts();
+      } else {
+        // Hide the entire container if no products to show
+        this.container.style.display = 'none';
+      }
+    }
+
+    renderProducts() {
+      const targetContainer = this.displayMode === 'carousel' ? this.carousel : this.grid;
+      const productsToShow =
+        this.displayMode === 'grid' ? Math.min(this.products.length, this.initialProducts) : this.products.length;
+
+      this.currentlyShown = productsToShow;
+      targetContainer.innerHTML = '';
+
+      const cardRenderer = new ProductCardRendererRVP(this.settings, this.widgetSettings);
+
+      this.products.slice(0, productsToShow).forEach((product) => {
+        const card = cardRenderer.createCard(product);
+        targetContainer.appendChild(card);
+      });
+
+      this.setupShowMoreButton();
+      this.initCarouselIfNeeded();
+    }
+
+    setupShowMoreButton() {
+      if (this.displayMode !== 'grid' || this.products.length <= this.currentlyShown) {
+        this.showMoreContainer.style.display = 'none';
+        return;
+      }
+
+      this.showMoreContainer.style.display = 'block';
+      this.showMoreButton.onclick = () => this.handleShowMore();
+    }
+
+    handleShowMore() {
+      const additionalProducts = Math.min(this.products.length - this.currentlyShown, this.initialProducts);
+
+      if (additionalProducts <= 0) return;
+
+      const cardRenderer = new ProductCardRendererRVP(this.settings, this.widgetSettings);
+
+      this.products.slice(this.currentlyShown, this.currentlyShown + additionalProducts).forEach((product) => {
+        const card = cardRenderer.createCard(product);
+        this.grid.appendChild(card);
+      });
+
+      this.currentlyShown += additionalProducts;
+
+      if (this.currentlyShown >= this.products.length) {
+        this.showMoreContainer.style.display = 'none';
+      }
+    }
+
+    initCarouselIfNeeded() {
+      if (this.displayMode !== 'carousel') return;
+
+      if (this.carouselController) {
+        this.carouselController.destroy();
+      }
+
+      this.carouselController = new CarouselControllerRVP(
+        this.carousel,
+        this.prevBtn,
+        this.nextBtn,
+        this.settings.cardLayout
+      );
+      this.carouselController.init();
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const containers = document.querySelectorAll('.recently-viewed-root');
+    containers.forEach((container) => {
+      const app = new RecentlyViewedApp(container);
+      app.init();
+    });
+  });
+</script>
+
+{% schema %}
+{
+  "name": "Recently Viewed Products",
+  "target": "section",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Title"
+    },
+    {
+      "type": "text",
+      "id": "rvp-title",
+      "label": "Title",
+      "default": "Recently Viewed Products"
+    },
+    {
+      "type": "text",
+      "id": "add_to_cart_text",
+      "label": "Add to Cart Button Text",
+      "default": "Add to Cart"
+    },
+    {
+      "type": "text",
+      "id": "buy_now_text",
+      "label": "Buy Now Button Text",
+      "default": "Buy Now"
+    }
+  ]
+}
+{% endschema %}

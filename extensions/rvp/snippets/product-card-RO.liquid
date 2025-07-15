@@ -1,0 +1,83 @@
+{% comment %} recently-ordered/extensions/recently-ordered/snippets/product-card-RO.liquid {% endcomment %}
+{%- assign layout = cardLayout | default: 'vertical' -%}
+{% comment %} {%- assign first_variant = product.variants.first -%} {% endcomment %}
+
+<link rel="stylesheet" href="{{ 'product-card-RO.css' | asset_url }}">
+
+<div
+  class="recently-ordered-card {% if layout == 'horizontal' %}recently-ordered-card--horizontal{% endif %}"
+  data-product-id="{{ product.id }}"
+  data-card-layout="{{ layout }}"
+  style="
+    --show-add-to-cart: {% if section.settings.show_add_to_cart %}block{% else %}none{% endif %};
+    --show-reorder: {% if section.settings.show_reorder %}block{% else %}none{% endif %};
+  "
+>
+  <!-- Image & Discount Badge (Shared) -->
+  <div class="recently-ordered-image-wrapper">
+    <a href="{{ product.url }}" class="recently-ordered-image-link">
+      <img
+        src="{{ product.image }}"
+        alt="{{ product.title | escape }}"
+        class="recently-ordered-image"
+        loading="lazy"
+        width="100%"
+        height="100%"
+      >
+    </a>
+  </div>
+
+  <!-- Product Details (Layout-Specific) -->
+  <div class="recently-ordered-details">
+    <!-- Title (Always Visible) -->
+    <a href="{{ product.url }}" class="recently-ordered-title"></a>
+
+    <!-- Reviews (Always Visible) -->
+    <a href="{{ product.url }}" class="recently-ordered-reviews-link">
+      <div class="recently-ordered-reviews">
+        <div class="recently-ordered-stars" style="--rating: {{ product.rating }};">★★★★★</div>
+        <span class="recently-ordered-review-count"></span>
+      </div>
+    </a>
+
+    <!-- Pricing (Shared Logic) -->
+    <div class="recently-ordered-price-wrapper">
+      <span class="recently-ordered-price"></span>
+      <span class="recently-ordered-compare-price"></span>
+      <div class="recently-ordered-badge"></div>
+    </div>
+
+    <!-- Buttons (Shared) -->
+
+    <div class="recently-ordered-button-container">
+      <button
+        type="button"
+        class="recently-ordered-atc-button quick-view-btn"
+        data-product="{{ product | json }}"
+        data-title="{{ product.title | escape }}"
+        data-action="add-to-cart-ro"
+        data-has-variants=""
+        style="display: var(--show-add-to-cart);"
+        aria-label="Add {{ product.title }} to cart"
+        data-product-card-swatch-id="{{ product.id | split: '/' | last }}"
+      >
+        <span class="recently-ordered-atc-button-text">{{ add_to_cart_text }}</span>
+      </button>
+
+      <button
+        type="button"
+        class="recently-ordered-reorder-button quick-view-btn"
+        data-product="{{ product | json }}"
+        data-title="{{ product.title | escape }}"
+        data-action="reorder"
+        data-has-variants=""
+        style="display: var(--show-reorder);"
+        aria-label="Reorder {{ product.title }}"
+      >
+        <span class="recently-ordered-reorder-button-text">{{ reorder_text }}</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+{% render 'quick-view-modal' %}

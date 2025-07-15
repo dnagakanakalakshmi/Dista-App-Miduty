@@ -1,0 +1,26 @@
+query RunInput {
+  cart {
+    cost {
+      subtotalAmount {
+        amount
+        currencyCode
+      }
+    }
+    lines {
+      quantity
+    }
+  }
+  shop {
+    validationFunctions: metafield(
+      namespace: "cart_validation", 
+      key: "validation_functions"
+    ) {
+      value
+      type
+    }
+  }
+  buyerJourney {
+    step
+  }
+  presentmentCurrencyRate
+}

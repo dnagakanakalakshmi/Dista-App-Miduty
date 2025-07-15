@@ -1,0 +1,82 @@
+{% comment %} recently-viewed/extensions/recently-viewed/snippets/product-card-RO.liquid {% endcomment %}
+{%- assign layout = cardLayout | default: 'vertical' -%}
+
+<link rel="stylesheet" href="{{ 'product-card.css' | asset_url }}">
+
+<div
+  class="recently-viewed-card {% if layout == 'horizontal' %}recently-viewed-card--horizontal{% endif %}"
+  data-product-id="{{ product.id }}"
+  data-card-layout="{{ layout }}"
+  style="
+    --show-add-to-cart: {% if section.settings.show_add_to_cart %}block{% else %}none{% endif %};
+    --show-buy-now: {% if section.settings.show_buynow %}block{% else %}none{% endif %};
+  "
+>
+  <!-- Image & Discount Badge (Shared) -->
+  <div class="recently-viewed-image-wrapper">
+    <a href="{{ product.url }}" class="recently-viewed-image-link">
+      <img
+        src="{{ product.image }}"
+        alt="{{ product.title | escape }}"
+        class="recently-viewed-image"
+        loading="lazy"
+        width="100%"
+        height="100%"
+      >
+    </a>
+  </div>
+
+  <!-- Product Details (Layout-Specific) -->
+  <div class="recently-viewed-details">
+    <!-- Title (Always Visible) -->
+    <a href="{{ product.url }}" class="recently-viewed-title"></a>
+
+    <!-- Reviews (Always Visible) -->
+    <a href="{{ product.url }}" class="recently-viewed-reviews-link">
+      <div class="recently-viewed-reviews">
+        <div class="recently-viewed-stars" style="--rating: {{ product.rating }};">★★★★★</div>
+        <span class="recently-viewed-review-count"></span>
+      </div>
+    </a>
+
+    <!-- Pricing (Shared Logic) -->
+    <div class="recently-viewed-price-wrapper">
+      <span class="recently-viewed-price"></span>
+      <span class="recently-viewed-compare-price"></span>
+      <div class="recently-viewed-badge"></div>
+    </div>
+
+    <!-- Buttons (Shared) -->
+
+    <div class="recently-viewed-button-container">
+      <button
+        type="button"
+        class="recently-viewed-atc-button quick-view-btn"
+        data-product="{{ product | json | escape }}"
+        data-title="{{ product.title | escape }}"
+        data-action="add-to-cart"
+        data-has-variants=""
+        style="display: var(--show-add-to-cart);"
+        aria-label="Add {{ product.title }} to cart"
+        data-product-card-swatch-id="{{ product.id | split: '/' | last }}"
+      >
+        <span class="recently-viewed-atc-button-text">{{ add_to_cart_text | default: 'Add to Cart' }}</span>
+      </button>
+
+      <button
+        type="button"
+        class="recently-viewed-buy-now-button quick-view-btn"
+        data-product="{{ product | json | escape }}"
+        data-title="{{ product.title | escape }}"
+        data-action="buy-now"
+        data-has-variants=""
+        style="display: var(--show-buy-now);"
+        aria-label="Buy Now {{ product.title }}"
+      >
+        <span class="recently-viewed-buy-now-button-text">{{ buy_now_text | default: 'Buy Now' }}</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+{% render 'quick-view-modal' %}

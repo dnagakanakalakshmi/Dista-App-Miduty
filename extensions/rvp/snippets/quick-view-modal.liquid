@@ -1,0 +1,673 @@
+{{ 'quick-view-modal.css' | asset_url | stylesheet_tag }}
+
+<script>
+  (function () {
+    const styleId = 'rvp-custom-quick-view-styles';
+    // Only fetch if the styles haven't been added yet
+    if (document.getElementById(styleId)) {
+      return;
+    }
+
+    const shopDomain = '{{ shop.permanent_domain }}';
+    const apiUrl = `/a/rvpp/app/quickviewcssRO?shop=${shopDomain}`;
+
+    fetch(apiUrl)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error('Network response was not ok');
+        }
+        return response.json();
+      })
+      .then((data) => {
+        if (data.css) {
+          const style = document.createElement('style');
+          style.id = styleId;
+          style.innerHTML = data.css;
+          document.head.appendChild(style);
+        }
+      })
+      .catch((error) => {
+        console.error('Error fetching Quick View custom CSS:', error);
+      });
+  })();
+</script>
+
+<script>
+  // Add event listener for Quick View button
+  document.body.addEventListener('click', function (event) {
+    if (event.target.closest('.quick-view-btn')) {
+      const button = event.target.closest('.quick-view-btn');
+      const productData = button.getAttribute('data-product');
+      const productTitle = button.getAttribute('data-title');
+      const actionType = button.getAttribute('data-action') || 'add-to-cart';
+      const hasVariants = button.getAttribute('data-has-variants') === 'true';
+
+      if (!productData) {
+        console.error('No product data found on button');
+        return;
+      }
+
+      // If no real variants, handle add to cart/buy now directly
+      if (!hasVariants) {
+        try {
+          const product = JSON.parse(productData);
+          const variantId = product.variants[0]?.id?.split('/').pop();
+          if (!variantId) return;
+
+          // Set button text to feedback state
+          const buttonSpan = button.querySelector('span') || button;
+          if (!buttonSpan.dataset.originalText) {
+            buttonSpan.dataset.originalText = buttonSpan.textContent;
+          }
+          const originalText = buttonSpan.dataset.originalText;
+          buttonSpan.textContent = actionType === 'reorder' || actionType === 'buy-now' ? 'Processing...' : 'Adding...';
+          button.disabled = true;
+
+          if (actionType === 'reorder' || actionType === 'buy-now') {
+            // Direct checkout
+            fetch('/cart/add.js', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: variantId, quantity: 1 }),
+            }).then(() => {
+              window.location.href = '/checkout';
+            });
+          } else {
+            // Direct add to cart
+            fetch('/cart/add.js', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: variantId, quantity: 1 }),
+            }).then(() => {
+              // Optionally show mini cart or feedback
+              const desktopCartCheckbox = document.getElementById('minicart__button--header--default');
+              const mobileCartCheckbox = document.getElementById('minicart__button--header--default-mobile');
+              if (desktopCartCheckbox) desktopCartCheckbox.checked = true;
+              if (mobileCartCheckbox) mobileCartCheckbox.checked = true;
+              setTimeout(() => {
+                buttonSpan.textContent = originalText;
+                button.disabled = false;
+              }, 2000);
+            });
+          }
+        } catch (error) {
+          console.error('Error parsing product data:', error);
+        }
+        return;
+      }
+
+      let atcTextRVP = button.querySelector('.recently-viewed-atc-button-text')?.textContent.trim() || '';
+      let atcTextRO = button.querySelector('.recently-ordered-atc-button-text')?.textContent.trim() || '';
+      let reorderText = button.querySelector('.recently-ordered-reorder-button-text')?.textContent.trim() || '';
+      let buyNowText = button.querySelector('.recently-viewed-buy-now-button-text')?.textContent.trim() || '';
+
+      try {
+        const product = JSON.parse(productData);
+        const decodedTitle = decodeURIComponent(productTitle);
+        showModal({ ...product, title: decodedTitle }, actionType, {
+          atcTextRVP,
+          atcTextRO,
+          reorderText,
+          buyNowText,
+        });
+      } catch (error) {
+        console.error('Error parsing product data:', error);
+      }
+    }
+  });
+
+  // Quick View Modal Logic
+  function showModal(product, actionType, buttonTexts = {}) {
+    if (document.querySelector('.rvp-quick-view-modal-wrapper')) {
+      return;
+    }
+
+    const AppUtils = window.RecentlyViewedUtils || window.RecentlyOrderedUtils;
+    if (!AppUtils) {
+      console.error('No utility object (RecentlyViewedUtils or RecentlyOrderedUtils) found.');
+      return;
+    }
+
+    const featuredImageUrl = product.image || 'https://via.placeholder.com/100';
+    const productHandle = product.url || '#';
+    const productTitle = product.title || 'Unknown Product';
+    const allImages = product.images || [{ url: featuredImageUrl, altText: 'No description available' }];
+
+    // Get all option names (e.g., Size, Color, Material)
+    const optionNames =
+      product.variants && product.variants.length > 0 && product.variants[0].selectedOptions
+        ? product.variants[0].selectedOptions.map((opt) => opt.name)
+        : [];
+
+    // For each option, get all unique values across all variants
+    const optionsHtml = optionNames
+      .map((optionName, optionIndex) => {
+        const values = [
+          ...new Set(
+            product.variants
+              .map((variant) => (variant.selectedOptions || []).find((opt) => opt.name === optionName)?.value)
+              .filter(Boolean)
+          ),
+        ];
+        return `
+      <div class="rvp-variant-group" data-option-index="${optionIndex}">
+        <div class="rvp-variant-label">${optionName}:</div>
+        <div class="rvp-variant-buttons">
+          ${values
+            .map((value, vIdx) => {
+              // Find if this value is sold out
+              const isSoldOut = !(product.variants || []).some(
+                (variant) =>
+                  (variant.selectedOptions || []).some((opt) => opt.name === optionName && opt.value === value) &&
+                  variant.availableForSale !== false
+              );
+              return `
+                <button type="button" class="rvp-variant-btn${
+                  isSoldOut ? ' rvp-variant-btn-soldout' : ''
+                }" data-option-index="${optionIndex}" data-value="${value}">${value}</button>
+              `;
+            })
+            .join('')}
+        </div>
+      </div>
+    `;
+      })
+      .join('');
+
+    document.body.style.overflow = 'hidden';
+    const modal = document.createElement('div');
+    const modalWrapper = document.createElement('div');
+    modalWrapper.className = 'rvp-quick-view-modal-wrapper';
+    modal.className = 'rvp-quick-view-modal-box';
+    const buttonLabel =
+      actionType === 'reorder'
+        ? buttonTexts.reorderText
+        : actionType === 'buy-now'
+        ? buttonTexts.buyNowText
+        : actionType === 'add-to-cart-ro'
+        ? buttonTexts.atcTextRO
+        : buttonTexts.atcTextRVP;
+
+    modal.innerHTML = `
+    <div class="rvp-quick-view-modal">
+        <button class="rvp-close">&times;</button>
+        <div class="rvp-modal-content">
+            <a class="rvp-back-to-shop" onclick="document.querySelector('.rvp-quick-view-modal-wrapper').remove(); document.body.style.overflow = ''">Back to shop</a>
+            <div class="rvp-quick-view-left-content">
+                <div class="rvp-thumbnail-carousel-wrapper">
+                  <button class="rvp-thumb-arrow rvp-thumb-arrow-up">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg>
+                  </button>
+                  <div class="rvp-quick-view-thumbnails" tabindex="0">
+                    ${allImages
+                      .map(
+                        (image, index) => `
+                        <img 
+                        src="${image.url}" 
+                        alt="Thumbnail ${index + 1}" 
+                        class="rvp-thumbnail-image" data-thumb-index="${index}" 
+                        onclick="document.getElementById('rvp-main-product-image').src='${image.url}'"
+                        />
+                    `
+                      )
+                      .join('')}
+                  </div>
+                  <button class="rvp-thumb-arrow rvp-thumb-arrow-down">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+                </div>
+                <div class="rvp-main-image-carousel-wrapper">
+                  <button class="rvp-main-arrow rvp-main-arrow-left">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                  </button>
+                  <div class="rvp-quick-view-main-image-list" tabindex="0">
+                    ${allImages
+                      .map(
+                        (img, idx) => `
+                      <img src="${img.url}" alt="${productTitle}" class="rvp-main-image-item" data-main-index="${idx}" draggable="false" />
+                    `
+                      )
+                      .join('')}
+                  </div>
+                  <button class="rvp-main-arrow rvp-main-arrow-right">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                  </button>
+                </div>
+            </div>
+            <div class="rvp-quick-view-right-content">
+                <a class="rvp-quick-view-product-title" href="${productHandle}">
+                    ${productTitle}
+                </a>
+                ${
+                  product.rating && product.ratingCount
+                    ? `
+                <div class="rvp-quick-view-reviews">
+                <span class="rvp-qv-reviews-badge__stars" data-score="${product.rating}">
+                ${renderStars(product.rating)}
+                </span>
+                <span class="rvp-qv-reviews-badge__text">
+                <strong>${product.ratingCount} Review${product.ratingCount == 1 ? '' : 's'}</strong>
+                </span>
+                </div>
+                `
+                : ''
+                }
+                 <a href="${productHandle}" target="_blank" class="rvp-view-details">view full details</a>
+
+                <div class="rvp-price-wrapper" id="rvp-quick-view-price-wrapper">
+                  <div class="rvp-compare-at-row">
+                    <span id="rvp-quick-view-compare-price" class="rvp-compare-at-price"></span>
+                  </div>
+                  <div class="rvp-price-row">
+                    <span id="rvp-quick-view-price"></span>
+                    <span class="rvp-vertical-separator">|</span>
+                    <span id="rvp-quick-view-discount-badge" class="rvp-discount-inline" style="display:none"></span>
+                  </div>
+                </div>
+                <form id="rvp-quick-view-form">
+                    <div id="rvp-quick-view-soldout-message" style="display:none; color:#000; font-weight:bold; margin-bottom:8px;">Sold out</div>
+                    <div class="rvp-variants-dropdown-wrapper">
+                    ${optionsHtml}
+                    </div>
+                    <div class="rvp-add-to-cart-container">
+                        <div class="rvp-quantity-selector">
+                            <button type="button" id="rvp-decrement-qty">-</button>
+                            <input type="number" id="rvp-quick-view-quantity" name="quantity" value="1" min="1" autocomplete="off" />
+                            <button type="button" id="rvp-increment-qty">+</button>
+                        </div>
+                        <button type="submit" class="rvp-add-to-cart-button">
+                          <span class="rvp-add-to-cart-text">${buttonLabel}</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+  `;
+
+    modalWrapper.appendChild(modal);
+    document.body.appendChild(modalWrapper);
+
+    // thumbnail
+    const thumbWrapper = modal.querySelector('.rvp-quick-view-thumbnails');
+    const thumbImages = Array.from(thumbWrapper.querySelectorAll('.rvp-thumbnail-image'));
+    const thumbArrowUp = modal.querySelector('.rvp-thumb-arrow-up');
+    const thumbArrowDown = modal.querySelector('.rvp-thumb-arrow-down');
+    const thumbImageHeight = 68; // 64px + 2*2px border + 4px margin
+
+    // Hide carousel arrows and disable scrolling if 5 or fewer thumbnails
+    if (thumbImages.length <= 5) {
+      thumbArrowUp.style.display = 'none';
+      thumbArrowDown.style.display = 'none';
+      thumbWrapper.style.overflowY = 'hidden';
+      thumbWrapper.style.maxHeight = 'none';
+    } else {
+      thumbArrowUp.style.display = '';
+      thumbArrowDown.style.display = '';
+      thumbWrapper.style.overflowY = 'auto';
+      thumbWrapper.style.maxHeight = '400px';
+    }
+
+    // --- Carousel logic ---
+    // Vertical thumbnail carousel
+    thumbArrowUp.addEventListener('click', () => {
+      thumbWrapper.scrollBy({ top: -thumbImageHeight, behavior: 'smooth' });
+    });
+    thumbArrowDown.addEventListener('click', () => {
+      thumbWrapper.scrollBy({ top: thumbImageHeight, behavior: 'smooth' });
+    });
+
+    // Horizontal main image carousel
+    const mainImageList = modal.querySelector('.rvp-quick-view-main-image-list');
+    const mainImages = Array.from(mainImageList.querySelectorAll('.rvp-main-image-item'));
+    const mainArrowLeft = modal.querySelector('.rvp-main-arrow-left');
+    const mainArrowRight = modal.querySelector('.rvp-main-arrow-right');
+    let mainIndex = 0;
+    function scrollToMainImage(idx) {
+      mainIndex = idx;
+      const img = mainImages[mainIndex];
+      img.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+    mainArrowLeft.addEventListener('click', () => {
+      if (mainIndex > 0) scrollToMainImage(mainIndex - 1);
+    });
+    mainArrowRight.addEventListener('click', () => {
+      if (mainIndex < mainImages.length - 1) scrollToMainImage(mainIndex + 1);
+    });
+    // Manual scroll: update mainIndex on scroll end
+    let mainScrollTimeout;
+    mainImageList.addEventListener('scroll', () => {
+      clearTimeout(mainScrollTimeout);
+      mainScrollTimeout = setTimeout(() => {
+        // Find the image closest to the center
+        const listRect = mainImageList.getBoundingClientRect();
+        let minDist = Infinity,
+          minIdx = 0;
+        mainImages.forEach((img, i) => {
+          const rect = img.getBoundingClientRect();
+          const dist = Math.abs(rect.left + rect.width / 2 - (listRect.left + listRect.width / 2));
+          if (dist < minDist) {
+            minDist = dist;
+            minIdx = i;
+          }
+        });
+        scrollToMainImage(minIdx);
+      }, 100);
+    });
+    // Thumbnail click updates main image
+    thumbImages.forEach((img, i) => {
+      img.addEventListener('click', () => scrollToMainImage(i));
+    });
+    // Initial highlight
+    scrollToMainImage(0);
+
+    // Quantity increment/decrement logic (already present)
+    const qtyInput = modal.querySelector('#rvp-quick-view-quantity');
+    modal.querySelector('#rvp-decrement-qty').addEventListener('click', function () {
+      let val = parseInt(qtyInput.value, 10) || 1;
+      if (val > 1) qtyInput.value = val - 1;
+    });
+    modal.querySelector('#rvp-increment-qty').addEventListener('click', function () {
+      let val = parseInt(qtyInput.value, 10) || 1;
+      qtyInput.value = val + 1;
+    });
+
+    // Add to Cart functionality for modal
+    modal.querySelector('#rvp-quick-view-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+
+      // Use the selectedOptions from button logic instead of looking for select elements
+      // selectedOptions is already defined and updated when buttons are clicked
+
+      // Find the matching variant
+      const matchedVariant =
+        (product.variants || []).find((variant) => {
+          if (!variant.selectedOptions) return false;
+          return selectedOptions.every((opt) =>
+            variant.selectedOptions.some((selOpt) => selOpt.name === opt.name && selOpt.value === opt.value)
+          );
+        }) || product.variants[0];
+
+      const variantId = matchedVariant.id ? matchedVariant.id.split('/').pop() : null;
+      const quantity = parseInt(qtyInput.value, 10) || 1;
+      const button = modal.querySelector('.rvp-add-to-cart-button');
+      if (!variantId || !button) return;
+
+      const buttonSpan = button.querySelector('.rvp-add-to-cart-text') || button;
+      const originalText = buttonSpan.textContent;
+      button.disabled = true;
+      if (buttonSpan.classList && buttonSpan.classList.contains('rvp-add-to-cart-text')) {
+        buttonSpan.textContent = actionType === 'reorder' || actionType === 'buy-now' ? 'Processing...' : 'Adding...';
+      } else {
+        buttonSpan.textContent = actionType === 'reorder' || actionType === 'buy-now' ? 'Processing...' : 'Adding...';
+      }
+
+      fetch('/cart/add.js', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: variantId, quantity }),
+      })
+        .then((response) => {
+          if (!response.ok) throw new Error('Network response was not ok');
+          return response.json();
+        })
+        .then((data) => {
+          // Optionally close modal here if you want
+          modal.remove();
+          modalWrapper.remove();
+          document.body.style.overflow = '';
+
+          if (actionType === 'reorder' || actionType === 'buy-now') {
+            window.location.href = '/checkout';
+          } else {
+            const desktopCartCheckbox = document.getElementById('minicart__button--header--default');
+            const mobileCartCheckbox = document.getElementById('minicart__button--header--default-mobile');
+            if (desktopCartCheckbox) desktopCartCheckbox.checked = true;
+            if (mobileCartCheckbox) mobileCartCheckbox.checked = true;
+
+            setTimeout(() => {
+              if (buttonSpan.classList && buttonSpan.classList.contains('rvp-add-to-cart-text')) {
+                buttonSpan.textContent = originalText;
+              } else {
+                buttonSpan.textContent = originalText;
+              }
+              button.disabled = false;
+            }, 2000);
+          }
+
+          // Update product title to reflect selected variant
+          const productTitleEl = modal.querySelector('.rvp-quick-view-product-title');
+          if (productTitleEl && matchedVariant) {
+            let baseTitle = product.title;
+            // If the product title ends with the first variant's title, remove it
+            const firstVariantTitle = product.variants[0]?.title;
+            if (
+              firstVariantTitle &&
+              firstVariantTitle !== 'Default Title' &&
+              baseTitle.endsWith(' - ' + firstVariantTitle)
+            ) {
+              baseTitle = baseTitle.slice(0, -(' - ' + firstVariantTitle).length);
+            }
+            const formattedVariantTitle = formatVariantTitle(matchedVariant.title);
+            if (formattedVariantTitle && formattedVariantTitle !== 'Default Title') {
+              productTitleEl.textContent = baseTitle + ' - ' + formattedVariantTitle;
+            } else {
+              productTitleEl.textContent = baseTitle;
+            }
+          }
+        })
+        .catch((error) => {
+          console.error('Add to cart error:', error);
+          buttonSpan.textContent = 'Error';
+          setTimeout(() => {
+            if (buttonSpan.classList && buttonSpan.classList.contains('rvp-add-to-cart-text')) {
+              buttonSpan.textContent = originalText;
+            } else {
+              buttonSpan.textContent = originalText;
+            }
+            button.disabled = false;
+          }, 2000);
+        });
+    });
+
+    // Close modal on clicking the close button
+    modal.querySelector('.rvp-close').addEventListener('click', () => {
+      modal.remove();
+      modalWrapper.remove();
+      document.body.style.overflow = '';
+    });
+
+    // Close modal on clicking outside the modal content
+    modalWrapper.addEventListener('click', (event) => {
+      if (event.target === modalWrapper) {
+        modal.remove();
+        modalWrapper.remove();
+        document.body.style.overflow = '';
+      }
+    });
+
+    const variantGroups = modal.querySelectorAll('.rvp-variant-group');
+    // Find the first available variant (or fallback to the first variant)
+    const firstAvailableVariant =
+      (product.variants || []).find((v) => v.availableForSale !== false) || product.variants[0];
+
+    // Set selectedOptions to match the first available variant's options
+    let selectedOptions = optionNames.map((name, i) => {
+      const match = (firstAvailableVariant.selectedOptions || []).find((opt) => opt.name === name);
+      return { name, value: match ? match.value : '' };
+    });
+    function updateVariantButtons() {
+      variantGroups.forEach((group, groupIdx) => {
+        const btns = group.querySelectorAll('.rvp-variant-btn');
+        btns.forEach((btn) => {
+          if (selectedOptions[groupIdx].value === btn.textContent) {
+            btn.classList.add('selected');
+          } else {
+            btn.classList.remove('selected');
+          }
+        });
+      });
+    }
+    variantGroups.forEach((group, groupIdx) => {
+      group.querySelectorAll('.rvp-variant-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (selectedOptions[groupIdx].value === btn.textContent) {
+            // Deselect if already selected
+            selectedOptions[groupIdx].value = '';
+          } else {
+            selectedOptions[groupIdx].value = btn.textContent;
+          }
+          updateVariantButtons();
+          updatePriceByVariant();
+        });
+      });
+    });
+    updateVariantButtons();
+
+    // Add this function for discount calculation
+    function getDiscountPercent(price, compareAtPrice) {
+      if (!compareAtPrice || compareAtPrice <= price) return null;
+      return Math.round(((compareAtPrice - price) / compareAtPrice) * 100);
+    }
+
+    function updatePriceByVariant() {
+      const addToCartBtn = modal.querySelector('.rvp-add-to-cart-button');
+      // If any option is unselected, disable Add to Cart and show 'MAKE A SELECTION'
+      const anyUnselected = selectedOptions.some((opt) => !opt.value);
+      const atcTextSpan = addToCartBtn.querySelector('.rvp-add-to-cart-text');
+      if (anyUnselected) {
+        addToCartBtn.disabled = true;
+        if (atcTextSpan) atcTextSpan.textContent = 'MAKE A SELECTION';
+        addToCartBtn.style.opacity = '0.7';
+        addToCartBtn.style.pointerEvents = 'none';
+        // Do NOT clear price/compare/badge, just leave them as they are
+        // Hide sold out message
+        const soldOutMsg = modal.querySelector('#rvp-quick-view-soldout-message');
+        if (soldOutMsg) soldOutMsg.style.display = 'none';
+        // Set product title to base title + selected options (if any)
+        const productTitleEl = modal.querySelector('.rvp-quick-view-product-title');
+        if (productTitleEl) {
+          const selectedLabels = selectedOptions.filter((opt) => opt.value).map((opt) => opt.value);
+          if (selectedLabels.length > 0) {
+            productTitleEl.textContent = product.title + ' - ' + selectedLabels.join(' - ');
+          } else {
+            productTitleEl.textContent = product.title;
+          }
+        }
+        return;
+      }
+
+      // Use selectedOptions from button logic
+      const matchedVariant =
+        (product.variants || []).find((variant) => {
+          if (!variant.selectedOptions) return false;
+          return selectedOptions.every((opt) =>
+            variant.selectedOptions.some((selOpt) => selOpt.name === opt.name && selOpt.value === opt.value)
+          );
+        }) || product.variants[0];
+
+      // Show/hide sold out message
+      const soldOutMsg = modal.querySelector('#rvp-quick-view-soldout-message');
+      if (matchedVariant.availableForSale === false) {
+        soldOutMsg.style.display = '';
+      } else {
+        soldOutMsg.style.display = 'none';
+      }
+
+      // Update price and compare at price
+      const priceEl = modal.querySelector('#rvp-quick-view-price');
+      const comparePriceEl = modal.querySelector('#rvp-quick-view-compare-price');
+      const badgeEl = modal.querySelector('#rvp-quick-view-discount-badge');
+      const separator = modal.querySelector('.rvp-vertical-separator');
+      const formattedPrice = parseFloat(matchedVariant.presentmentPrice).toFixed(2);
+      priceEl.textContent = window.CurrencyUtils.formatMoneyCurrency(String(formattedPrice), window.money_format);
+      if (
+        matchedVariant.presentmentCompareAtPrice &&
+        matchedVariant.presentmentCompareAtPrice !== matchedVariant.presentmentPrice
+      ) {
+        comparePriceEl.textContent = window.CurrencyUtils.formatMoneyCurrency(
+          String(parseFloat(matchedVariant.presentmentCompareAtPrice).toFixed(2)),
+          window.money_format
+        );
+        comparePriceEl.style.display = '';
+        if (separator) separator.style.display = '';
+        // Show discount badge
+        const percentOff = getDiscountPercent(
+          parseFloat(matchedVariant.presentmentPrice),
+          parseFloat(matchedVariant.presentmentCompareAtPrice)
+        );
+        if (percentOff && percentOff > 0) {
+          badgeEl.textContent = `${percentOff}% OFF`;
+          badgeEl.className = 'rvp-discount-inline';
+          badgeEl.style.display = '';
+        } else {
+          badgeEl.style.display = 'none';
+        }
+      } else {
+        comparePriceEl.textContent = '';
+        comparePriceEl.style.display = 'none';
+        badgeEl.style.display = 'none';
+        if (separator) separator.style.display = 'none';
+      }
+
+      // Disable/enable Add to Cart button based on availability
+      if (matchedVariant.availableForSale === false) {
+        addToCartBtn.disabled = true;
+        if (atcTextSpan) atcTextSpan.textContent = 'Sold Out';
+        addToCartBtn.style.opacity = '0.5';
+        addToCartBtn.style.pointerEvents = 'none';
+      } else {
+        addToCartBtn.disabled = false;
+        if (atcTextSpan) atcTextSpan.textContent = buttonLabel;
+        addToCartBtn.style.opacity = '';
+        addToCartBtn.style.pointerEvents = '';
+      }
+
+      // Update product title to reflect selected variant
+      const productTitleEl = modal.querySelector('.rvp-quick-view-product-title');
+      if (productTitleEl && matchedVariant) {
+        let baseTitle = product.title;
+        // If the product title ends with the first variant's title, remove it
+        const firstVariantTitle = product.variants[0]?.title;
+        if (
+          firstVariantTitle &&
+          firstVariantTitle !== 'Default Title' &&
+          baseTitle.endsWith(' - ' + firstVariantTitle)
+        ) {
+          baseTitle = baseTitle.slice(0, -(' - ' + firstVariantTitle).length);
+        }
+        const formattedVariantTitle = formatVariantTitle(matchedVariant.title);
+        if (formattedVariantTitle && formattedVariantTitle !== 'Default Title') {
+          productTitleEl.textContent = baseTitle + ' - ' + formattedVariantTitle;
+        } else {
+          productTitleEl.textContent = baseTitle;
+        }
+      }
+    }
+
+    // Call once to ensure correct price and title on open
+    updatePriceByVariant();
+  }
+
+  // Utility to format variant title for display
+  function formatVariantTitle(title) {
+    return title && title.includes(' / ') ? title.replace(/ \/ /g, ' - ') : title;
+  }
+
+  // Renders individual star spans for ratings
+  function renderStars(rating = 0) {
+    let starsHtml = '';
+    const roundedRating = Math.round(rating * 2) / 2;
+    for (let i = 1; i <= 5; i++) {
+      if (i <= roundedRating) {
+        starsHtml += '<span class="rvp-qv-star rvp-qv-star--on">★</span>';
+      } else if (i - 0.5 === roundedRating) {
+        starsHtml +=
+          '<span class="rvp-qv-star rvp-qv-star--half"><span class="rvp-qv-star__half--on">★</span><span class="rvp-qv-star__half--off">★</span></span>';
+      } else {
+        starsHtml += '<span class="rvp-qv-star rvp-qv-star--off">★</span>';
+      }
+    }
+    return starsHtml;
+  }
+</script>

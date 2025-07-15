@@ -1,0 +1,510 @@
+{% assign timestamp = 'now' | date: '%s' %}
+{% assign random_salt = timestamp | append: shop.id | append: shop.domain | append: timestamp %}
+{% if customer %}
+  {%- assign uid = customer.id | hmac_sha256: 'Polina' -%}
+  {%- assign dynamic_customer_id = customer.id -%}
+{% else %}
+  {%- assign uid = random_salt | hmac_sha256: 'Polina' -%}
+  {%- assign dynamic_customer_id = random_salt -%}
+{% endif %}
+
+<link rel="stylesheet" href="{{ 'RecentlyViewed.css' | asset_url }}">
+<link rel="stylesheet" href="{{ 'product-card.css' | asset_url }}">
+
+<template id="minicart-product-card-template" data-currency="{{ localization.country.currency.iso_code }}">
+  {% render 'product-card',
+    cardLayout: 'horizontal',
+    add_to_cart_text: block.settings.add_to_cart_text,
+    buy_now_text: block.settings.buy_now_text
+  %}
+</template>
+
+<script src="{{ 'currency.js' | asset_url }}" async></script>
+<script src="{{ 'recentlyViewedUtils.js' | asset_url }}" async></script>
+
+{% if product %}
+  <script>
+    window.currentProductHandle = '{{ product.handle }}';
+    window.currentProductId = '{{ product.id }}';
+  </script>
+{% endif %}
+
+<script>
+  window.money_format = '{{ shop.money_with_currency_format }}';
+
+  function createProductCard(product, addToCartText = 'Add to Cart', buyNowText = 'Buy Now', settings = {}) {
+    const template = document.getElementById('minicart-product-card-template');
+    if (!template) return document.createElement('div'); // fallback
+
+    const card = template.content.children[1].cloneNode(true);
+
+    // Fill in fields
+    card.setAttribute('data-product-id', product.id);
+    card.style.setProperty('--show-add-to-cart', settings.showAddToCart ? 'block' : 'none');
+    card.style.setProperty('--show-buy-now', settings.showBuyNow ? 'block' : 'none');
+
+    // Image
+    const img = card.querySelector('.recently-viewed-image');
+    if (img) {
+      img.src = product.image || '';
+      img.alt = product.title || '';
+    }
+    const imgLink = card.querySelector('.recently-viewed-image-link');
+    if (imgLink) imgLink.href = product.url;
+
+    // Title
+    const titleLink = card.querySelector('.recently-viewed-title');
+    if (titleLink) {
+      titleLink.href = product.url;
+      titleLink.textContent = product.title || '';
+    }
+
+    // Reviews
+    const stars = card.querySelector('.recently-viewed-stars');
+    const reviewCount = card.querySelector('.recently-viewed-review-count');
+    const reviewsLink = card.querySelector('.recently-viewed-reviews-link');
+    const rating = Number(product.rating) || 0;
+    const count = Number(product.ratingCount) || 0;
+
+    if (stars) {
+      stars.style.setProperty('--rating', rating);
+    }
+
+    if (reviewCount) {
+      if (count > 0) {
+        // Use widgetSettings for review text
+        const starsText = settings.widgetSettings?.starsText || '{count} review/reviews';
+        reviewCount.textContent = starsText.replace('{count}', count);
+        if (reviewCount.parentElement) {
+          reviewCount.parentElement.classList.add('visible');
+          reviewCount.parentElement.style.visibility = 'visible';
+        }
+      } else {
+        reviewCount.textContent = '';
+        if (reviewCount.parentElement) {
+          reviewCount.parentElement.classList.remove('visible');
+          reviewCount.parentElement.style.visibility = 'hidden';
+        }
+      }
+    }
+
+    if (reviewsLink) reviewsLink.href = product.url;
+
+    // Pricing
+    const price = card.querySelector('.recently-viewed-price');
+    if (price) {
+      const presentmentPrice = product.variants?.[0]?.presentmentPrice;
+      if (presentmentPrice) {
+        const stringCurrency = String(parseFloat(presentmentPrice).toFixed(2));
+        price.textContent = window.CurrencyUtils.formatMoneyCurrency(stringCurrency, window.money_format);
+      } else {
+        price.textContent = '';
+      }
+    }
+    const comparePrice = card.querySelector('.recently-viewed-compare-price');
+    if (comparePrice) {
+      const presentmentCompareAtPrice = product.variants?.[0]?.presentmentCompareAtPrice;
+      if (presentmentCompareAtPrice) {
+        const stringCurrency = String(parseFloat(presentmentCompareAtPrice).toFixed(2));
+        comparePrice.textContent = window.CurrencyUtils.formatMoneyCurrency(stringCurrency, window.money_format);
+        comparePrice.style.display = 'inline';
+      } else {
+        comparePrice.textContent = '';
+        comparePrice.style.display = 'none';
+      }
+    }
+
+    // Add to Cart Button
+    const atcBtn = card.querySelector('.recently-viewed-atc-button');
+    if (atcBtn) {
+      atcBtn.href = product.url;
+      atcBtn.setAttribute('aria-label', `Add ${product.title} to cart`);
+      const atcText = atcBtn.querySelector('.recently-viewed-atc-button-text');
+      if (atcText) atcText.textContent = addToCartText;
+    }
+
+    // Buy Now Button
+    const buyNowBtn = card.querySelector('.recently-viewed-buy-now-button');
+    if (buyNowBtn) {
+      buyNowBtn.setAttribute('aria-label', `Buy Now ${product.title}`);
+      const buyNowTextSpan = buyNowBtn.querySelector('.recently-viewed-buy-now-button-text');
+      if (buyNowTextSpan) buyNowTextSpan.textContent = buyNowText;
+    }
+
+    // Discount badge
+    const badge = card.querySelector('.recently-viewed-badge');
+    if (badge) {
+      const compareAt = parseFloat(product.variants?.[0]?.presentmentCompareAtPrice || 0);
+      const priceVal = parseFloat(product.variants?.[0]?.presentmentPrice || 0);
+      const discount = compareAt > priceVal ? Math.round(((compareAt - priceVal) / compareAt) * 100) : 0;
+      if (discount > 0) {
+        // Use widgetSettings for save text
+        const saveText = settings.widgetSettings?.saveText || 'Save {percent}%';
+        const parts = saveText.split('{percent}');
+        let after = parts[1] || '';
+        let symbol = '';
+        if (after.startsWith('%')) {
+          symbol = '%';
+          after = after.slice(1);
+        }
+        badge.innerHTML = `${parts[0]}<div class="recently-viewed-discount-value">${discount}${symbol}</div>${after}`;
+        badge.style.display = 'flex';
+        badge.style.flexDirection = 'row';
+        badge.style.whiteSpace = 'pre';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+
+    // Add to Cart Button data-product-card-swatch-id
+    if (atcBtn) {
+      const numericID = String(product.id).replace(/\D/g, '');
+      atcBtn.setAttribute('data-product-card-swatch-id', numericID);
+    }
+
+    // Buy Now Button data-product-card-swatch-id
+    if (buyNowBtn) {
+      const numericID = String(product.id).replace(/\D/g, '');
+      buyNowBtn.setAttribute('data-product-card-swatch-id', numericID);
+    }
+
+    // Variant input
+    const variantInput = card.querySelector('.product-variant-id');
+    if (variantInput && product.variants?.[0]?.id) {
+      variantInput.value = String(product.variants[0].id).split('/').pop();
+    }
+
+    // Form attributes
+    const formEl = card.querySelector('.recently-viewed-form');
+    const buyNowFormEl = card.querySelector('.recently-viewed-buy-now-form');
+    if (formEl && product.variants?.[0]?.id) {
+      formEl.setAttribute('data-product-title', product.title);
+      formEl.setAttribute('data-variant-id', String(product.variants[0].id).split('/').pop());
+    }
+    if (buyNowFormEl && product.variants?.[0]?.id) {
+      buyNowFormEl.setAttribute('data-product-title', product.title);
+      buyNowFormEl.setAttribute('data-variant-id', String(product.variants[0].id).split('/').pop());
+    }
+
+    // Disable buttons if all variants unavailable
+    const allVariantsUnavailable = !product.variants?.some((v) => v.availableForSale);
+    if (allVariantsUnavailable) {
+      if (atcBtn) {
+        atcBtn.disabled = true;
+        atcBtn.querySelector('.recently-viewed-atc-button-text').innerHTML = 'Sold Out';
+        atcBtn.style.opacity = '0.5';
+        atcBtn.style.pointerEvents = 'none';
+      }
+      if (buyNowBtn) {
+        buyNowBtn.disabled = true;
+        buyNowBtn.querySelector('.recently-viewed-buy-now-button-text').innerHTML = 'Sold Out';
+        buyNowBtn.style.opacity = '0.5';
+        buyNowBtn.style.pointerEvents = 'none';
+      }
+    }
+
+    // Setup quick view buttons
+    const quickViewButtons = card.querySelectorAll('.quick-view-btn');
+    const hasRealVariants =
+      product.variants && product.variants.length > 1
+      || (product.variants && product.variants.length === 1 && product.variants[0].title !== 'Default Title');
+    quickViewButtons.forEach(btn => {
+      btn.setAttribute('data-product', JSON.stringify(product));
+      btn.setAttribute('data-title', encodeURIComponent(product.title));
+      btn.setAttribute('data-has-variants', hasRealVariants ? 'true' : 'false');
+    });
+
+    return card;
+  }
+
+  class MinicartCarouselControllerRVP {
+    constructor(carousel, prevBtn, nextBtn) {
+      this.carousel = carousel;
+      this.prevBtn = prevBtn;
+      this.nextBtn = nextBtn;
+      this.currentIndex = 0;
+      this.cards = [];
+      this.resizeObserver = new ResizeObserver(() => this.handleResize());
+    }
+
+    init() {
+      this.cards = Array.from(this.carousel.querySelectorAll('.recently-viewed-card'));
+      if (this.cards.length === 0) return;
+
+      this.containerWidth = this.carousel.parentElement.getBoundingClientRect().width;
+      this.maxIndex = this.cards.length - 1;
+
+      this.prevBtn.addEventListener('click', () => this.navigate(-1));
+      this.nextBtn.addEventListener('click', () => this.navigate(1));
+      this.resizeObserver.observe(this.carousel.parentElement);
+
+      this.updateCarousel();
+    }
+
+    navigate(direction) {
+      this.currentIndex = Math.max(0, Math.min(this.currentIndex + direction, this.maxIndex));
+      this.updateCarousel();
+    }
+
+    updateCarousel() {
+      const offset = -this.currentIndex * this.carousel.parentElement.getBoundingClientRect().width ;
+      this.carousel.style.transform = `translateX(${offset-3*(this.currentIndex)}px)`;
+      this.carousel.style.width = this.cards.length * this.containerWidth + 'px';
+      this.prevBtn.style.display = this.currentIndex <= 0 ? 'none' : 'flex';
+      this.nextBtn.style.display = this.currentIndex >= this.maxIndex ? 'none' : 'flex';
+    }
+
+    handleResize() {
+      this.containerWidth = this.carousel.parentElement.offsetWidth;
+      this.updateCarousel();
+    }
+
+    destroy() {
+      this.resizeObserver.disconnect();
+      this.prevBtn.removeEventListener('click', () => this.navigate(-1));
+      this.nextBtn.removeEventListener('click', () => this.navigate(1));
+    }
+  }
+
+  function renderRecentlyViewedInMinicart(products, settings = {}) {
+    const minicartEntries = getVisibleMinicartEntries();
+
+    // Prevent duplicate injection
+    const oldTitle = minicartEntries.querySelector('.recently-viewed-title-minicart');
+    if (oldTitle) oldTitle.remove();
+    const oldWrapper = minicartEntries.querySelector('.recently-viewed-carousel-wrapper--minicart');
+    if (oldWrapper) oldWrapper.remove();
+
+    // --- Filter out current product if on product page ---
+    let filteredProducts = products;
+    if (window.currentProductHandle || window.currentProductId) {
+      filteredProducts = products.filter(
+        (product) =>
+          window.currentProductHandle &&
+          product.handle !== window.currentProductHandle &&
+          window.currentProductId &&
+          String(window.RecentlyViewedUtils.extractNumericId(product.id)) !== String(window.currentProductId)
+      );
+    }
+
+    if (!filteredProducts.length) return;
+
+    // --- Carousel Wrapper with Prev/Next Buttons ---
+    const carouselWrapper = document.createElement('div');
+    carouselWrapper.className = 'recently-viewed-carousel-wrapper recently-viewed-carousel-wrapper--minicart';
+    carouselWrapper.style.position = 'relative';
+
+    // Prev Button
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'recently-viewed-carousel-prev recently-viewed-carousel-prev--minicart';
+    prevBtn.setAttribute('aria-label', 'Previous products');
+    prevBtn.textContent = '❮';
+
+    // Next Button
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'recently-viewed-carousel-next recently-viewed-carousel-next--minicart';
+    nextBtn.setAttribute('aria-label', 'Next products');
+    nextBtn.textContent = '❯';
+
+    // Carousel (scrollable container)
+    const carousel = document.createElement('div');
+    carousel.className = 'recently-viewed-carousel recently-viewed-carousel--minicart';
+    carousel.style.display = 'flex';
+    carousel.style.flexDirection = 'row';
+    carousel.style.gap = '0';
+    carousel.style.transition = 'transform 0.3s';
+
+    if (settings.css) {
+      let styleTag = document.getElementById('rvp-minicart-custom-css');
+      if (!styleTag) {
+        styleTag = document.createElement('style');
+        styleTag.id = 'rvp-minicart-custom-css';
+        document.head.appendChild(styleTag);
+      }
+      styleTag.textContent = settings.css;
+    }
+
+    // Render cards (simple version, you can enhance as needed)
+    filteredProducts.forEach((product) => {
+      const card = createProductCard(
+        product,
+        '{{ block.settings.add_to_cart_text | escape }}',
+        '{{ block.settings.buy_now_text | escape }}',
+        settings // now includes widgetSettings
+      );
+      carousel.appendChild(card);
+    });
+
+    // Assemble carousel wrapper
+    carouselWrapper.appendChild(prevBtn);
+    carouselWrapper.appendChild(carousel);
+    carouselWrapper.appendChild(nextBtn);
+
+    // Heading
+    const heading = document.createElement('div');
+    heading.className = 'recently-viewed-title-minicart';
+    heading.textContent = 'Recently Viewed Products';
+    heading.style.fontWeight = 'bold';
+
+    // Container for heading + carousel
+    const container = document.createElement('div');
+    container.className = 'recently-viewed-minicart-container';
+    container.appendChild(heading);
+    container.appendChild(carouselWrapper);
+
+    // Insert as the last child of minicart__entries
+    if (minicartEntries) {
+      minicartEntries.appendChild(container);
+    }
+
+    // --- Initialize Carousel Controller ---
+    setTimeout(() => {
+      new MinicartCarouselControllerRVP(carousel, prevBtn, nextBtn).init();
+    }, 0);
+  }
+
+  function fetchRecentlyViewedProducts(callback) {
+    const customerId = '{{ dynamic_customer_id }}';
+    const storeUrl = '{{ shop.permanent_domain }}';
+    let sessionId = localStorage.getItem('recentlyViewedSessionId') || '';
+    const uid = '{{ uid }}';
+    let jwtToken = window.RecentlyViewedUtils.getCookie('jwt');
+    let globalToken = jwtToken;
+    const currency = document.getElementById('minicart-product-card-template').getAttribute('data-currency') || 'USD';
+
+    // Initialize session ID if needed
+    if (customerId.length > 13 && !sessionId) {
+      sessionId = window.RecentlyViewedUtils.generateSessionId();
+      localStorage.setItem('recentlyViewedSessionId', sessionId);
+      localStorage.setItem('recentlyViewedSessionId2', sessionId);
+      localStorage.setItem('recentlyViewedSessionId3', sessionId);
+      document.cookie = 'jwt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+      jwtToken = null;
+      globalToken = null;
+    }
+
+    if (customerId.length == 13 && sessionId) {
+      document.cookie = 'jwt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+      jwtToken = null;
+      globalToken = null;
+    }
+
+    jwtToken = window.RecentlyViewedUtils.getCookie('jwt');
+    globalToken = jwtToken;
+
+    const displayURL = `/a/rvpp/app/apishopify?customerId=${customerId}&storeUrl=${storeUrl}&sessionId=${sessionId}&uid=${uid}&token=${
+      jwtToken || ''
+    }&currency=${currency}&timestamp=${Date.now()}`;
+    fetch(displayURL, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        // --- Add your logic here ---
+        if (data.token && !jwtToken) {
+          globalToken = data.token;
+          window.RecentlyViewedUtils.setCookie('jwt', data.token, 3.5);
+        }
+
+        if (customerId.length == 13 && sessionId) {
+          localStorage.removeItem('recentlyViewedSessionId');
+        }
+        // --- End your logic ---
+        if (data.products && data.products.length > 0) {
+          // Pass widgetSettings to the callback
+          callback(data.products, { ...data.settings, widgetSettings: data.widgetSettings });
+        }
+      })
+      .catch(() => {});
+  }
+
+  function attachMinicartListeners() {
+    const desktopCartCheckbox = document.querySelector('#minicart__button--header--default');
+    if (desktopCartCheckbox) {
+      desktopCartCheckbox.addEventListener('change', function () {
+        if (desktopCartCheckbox.checked) {
+          const minicartEntries = document.querySelector('.minicart__entries');
+          if (minicartEntries) {
+            fetchRecentlyViewedProducts(renderRecentlyViewedInMinicart);
+            
+          }
+        }
+      });
+    }
+    const mobileCartCheckbox = document.querySelector('#minicart__button--header--default-mobile');
+    if (mobileCartCheckbox) {
+      mobileCartCheckbox.addEventListener('change', function () {
+        if (mobileCartCheckbox.checked) {
+          const minicartEntries = document.querySelector('.minicart__entries');
+          if (minicartEntries) {
+            fetchRecentlyViewedProducts(renderRecentlyViewedInMinicart);
+          }
+        }
+      });
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', attachMinicartListeners);
+  
+  // Observe changes to data-last-update attribute on any div
+  const observer = new MutationObserver((mutationsList) => {
+    var dataFetched=false;
+    for (const mutation of mutationsList) {
+      if (
+        mutation.type === 'attributes' &&
+        mutation.attributeName === 'data-last-update' &&
+        mutation.target.tagName === 'DIV' && !dataFetched
+      ) {
+          fetchRecentlyViewedProducts(renderRecentlyViewedInMinicart);
+          dataFetched=true;
+      }
+    }
+  });
+
+  const minicartEntries = document.querySelector('.minicart__entries');
+  if (minicartEntries) {
+    observer.observe(minicartEntries, { attributes: true, attributeFilter: ['data-last-update'] });
+  }
+
+  function getVisibleMinicartEntries() {
+    const entries = Array.from(document.querySelectorAll('.minicart__entries'));
+    return entries.find((el) => {
+      // Check if element is visible
+      return el.offsetParent !== null && window.getComputedStyle(el).display !== 'none';
+    });
+  }
+</script>
+
+{% render 'quick-view-modal' %}
+
+{% schema %}
+{
+  "name": "Recently Viewed Minicart",
+  "target": "body",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Title"
+    },
+    {
+      "type": "text",
+      "id": "rvp-title",
+      "label": "Title",
+      "default": "Recently Viewed Products"
+    },
+    {
+      "type": "text",
+      "id": "add_to_cart_text",
+      "label": "Add to Cart Button Text",
+      "default": "Add to Cart"
+    },
+    {
+      "type": "text",
+      "id": "buy_now_text",
+      "label": "Buy Now Button Text",
+      "default": "Buy Now"
+    }
+  ]
+}
+{% endschema %}

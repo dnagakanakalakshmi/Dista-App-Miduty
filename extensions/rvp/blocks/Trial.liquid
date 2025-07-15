@@ -1,0 +1,109 @@
+{% assign timestamp = 'now' | date: '%s' %}
+{% assign random_salt = timestamp | append: shop.id | append: shop.domain | append: timestamp %}
+{% if customer %}
+  {%- assign uid = customer.id | hmac_sha256: 'Polina' -%}
+  {%- assign dynamic_customer_id = customer.id -%}
+{% else %}
+  {%- assign uid = random_salt | hmac_sha256: 'Polina' -%}
+  {%- assign dynamic_customer_id = random_salt -%}
+{% endif %}
+
+<script>
+  document.addEventListener('DOMContentLoaded', async function () {
+    let customerId = '{{ dynamic_customer_id }}';
+    var storeUrl = '{{ shop.url }}';
+    let sessionId = localStorage.getItem('recentlyViewedSessionId') || '';
+    let uid = '{{ uid }}';
+
+    function getCookie(name) {
+      let nameEQ = name + '=';
+      let cookiesArray = document.cookie.split(';');
+      for (let cookie of cookiesArray) {
+        while (cookie.charAt(0) == ' ') cookie = cookie.substring(1);
+        if (cookie.indexOf(nameEQ) == 0) return cookie.substring(nameEQ.length, cookie.length);
+      }
+      return null;
+    }
+
+    function setCookie(key, value, hours) {
+      const date = new Date();
+      date.setTime(date.getTime() + hours * 60 * 60 * 1000);
+      document.cookie = `${key}=${value}; expires=${date.toUTCString()}; path=/`;
+    }
+
+    function generateSessionId() {
+      return 'session_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    let jwtToken = getCookie('jwt');
+    let globalToken = jwtToken;
+
+    if (customerId.length > 13) {
+      if (!sessionId) {
+        sessionId = generateSessionId();
+        localStorage.setItem('recentlyViewedSessionId', sessionId);
+        document.cookie = 'jwt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+        jwtToken = null;
+        globalToken = null;
+      }
+    }
+
+    if (customerId.length == 13 && sessionId) {
+      document.cookie = 'jwt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+      jwtToken = null;
+      globalToken = null;
+    }
+
+    jwtToken = getCookie('jwt');
+    globalToken = jwtToken;
+
+    // Track product view if on product page
+    let targetname = '{{ template.name }}';
+
+    if (targetname === 'product') {
+      let productId = '{{ product.id }}';
+
+      if (!productId) {
+        console.error('Could not find product ID.');
+        return;
+      }
+
+      try {
+        const apiURL = '/a/rvpp/app/apishopify';
+        const response = await fetch(apiURL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerId,
+            sessionId,
+            productId,
+            storeUrl,
+            token: globalToken,
+          }),
+        });
+
+        let data = await response.json();
+
+        // If customer is logged in, remove session ID
+        if (customerId && customerId.length === 13 && sessionId) {
+          localStorage.removeItem('recentlyViewedSessionId');
+        }
+
+        if (data.token) {
+          globalToken = data.token;
+          setCookie('jwt', data.token, 3.5);
+        }
+      } catch (error) {
+        console.error('Error tracking product view:', error);
+      }
+    }
+  });
+</script>
+
+{% schema %}
+{
+  "name": "Dista App",
+  "target": "body",
+  "settings": []
+}
+{% endschema %}

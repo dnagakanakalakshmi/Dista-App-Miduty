@@ -1,0 +1,37 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "9324bd51addc6929875fed517ac9a709"
+application_url = "https://dista-app.onrender.com"
+embedded = true
+name = "Dista App"
+handle = "dista-app"
+
+[webhooks]
+api_version = "2025-04"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_products, read_products, read_orders, read_all_orders, read_customers, read_checkouts, write_checkouts, read_validations, write_validations, read_translations, read_payment_customizations, write_payment_customizations"
+
+[auth]
+redirect_urls = [
+  "https://dista-app.onrender.com/auth/callback",
+  "https://dista-app.onrender.com/auth/shopify/callback",
+  "https://dista-app.onrender.com/api/auth/callback"
+]
+
+[pos]
+embedded = false
+
+[build]
+include_config_on_deploy = true
+dev_store_url = "distaxstaging.myshopify.com"
+automatically_update_urls_on_dev = true
