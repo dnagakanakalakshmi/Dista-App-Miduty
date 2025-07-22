@@ -38,3 +38,5 @@ embedded = false
 
 [build]
 include_config_on_deploy = true
+dev_store_url = "distaxstaging.myshopify.com"
+automatically_update_urls_on_dev = true

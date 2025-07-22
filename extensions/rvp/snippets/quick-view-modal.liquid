@@ -33,6 +33,51 @@
 </script>
 
 <script>
+  function fetchCartDrawer() {
+    fetch('?section_id=cart-drawer')
+      .then((res) => res.text())
+      .then((html) => {
+        const parser = new DOMParser();
+        const parsedDoc = parser.parseFromString(html, 'text/html');
+        const newDrawer = parsedDoc.querySelector('#CartDrawer');
+
+        if (!newDrawer) {
+          console.warn('CartDrawer not found in section response.');
+          return;
+        }
+
+        const currentDrawer = document.querySelector('#CartDrawer');
+
+        if (currentDrawer) {
+          currentDrawer.innerHTML = newDrawer.innerHTML;
+        } else {
+          document.body.appendChild(newDrawer);
+        }
+
+        // Open minicart
+        document.documentElement.classList.add('cart--open');
+
+        // Reinitialize scripts if needed (optional)
+        reinitializeCartDrawerEvents(newDrawer);
+      })
+      .catch((error) => {
+        console.error('Cart drawer fetch failed:', error);
+      });
+  }
+
+  function reinitializeCartDrawerEvents(drawer) {
+    const scripts = drawer.querySelectorAll('script');
+    scripts.forEach((oldScript) => {
+      const newScript = document.createElement('script');
+      if (oldScript.src) {
+        newScript.src = oldScript.src;
+      } else {
+        newScript.textContent = oldScript.textContent;
+      }
+      document.body.appendChild(newScript);
+    });
+  }
+
   // Add event listener for Quick View button
   document.body.addEventListener('click', function (event) {
     if (event.target.closest('.quick-view-btn')) {
@@ -54,7 +99,7 @@
           const variantId = product.variants[0]?.id?.split('/').pop();
           if (!variantId) return;
 
-          // Set button text to feedback state
+          // Prevent multiple clicks
           const buttonSpan = button.querySelector('span') || button;
           if (!buttonSpan.dataset.originalText) {
             buttonSpan.dataset.originalText = buttonSpan.textContent;
@@ -63,33 +108,77 @@
           buttonSpan.textContent = actionType === 'reorder' || actionType === 'buy-now' ? 'Processing...' : 'Adding...';
           button.disabled = true;
 
-          if (actionType === 'reorder' || actionType === 'buy-now') {
-            // Direct checkout
-            fetch('/cart/add.js', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: variantId, quantity: 1 }),
-            }).then(() => {
-              window.location.href = '/checkout';
-            });
-          } else {
-            // Direct add to cart
-            fetch('/cart/add.js', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: variantId, quantity: 1 }),
-            }).then(() => {
-              // Optionally show mini cart or feedback
-              const desktopCartCheckbox = document.getElementById('minicart__button--header--default');
-              const mobileCartCheckbox = document.getElementById('minicart__button--header--default-mobile');
-              if (desktopCartCheckbox) desktopCartCheckbox.checked = true;
-              if (mobileCartCheckbox) mobileCartCheckbox.checked = true;
+          // Ensure add.js is called only once
+          if (button.dataset.addingToCart === 'true') return;
+          button.dataset.addingToCart = 'true';
+
+          // Add to cart
+          fetch('/cart/add.js', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: variantId, quantity: 1 }),
+          })
+            .then(() => {
+              // Update and open the cart drawer
+              fetch('?section_id=cart-drawer')
+                .then((response) => response.text())
+                .then((text) => {
+                  const html = new DOMParser().parseFromString(text, 'text/html');
+                  const newCartDrawer = html.querySelector('cart-drawer');
+                  const oldCartDrawer = document.querySelector('cart-drawer');
+
+                  if (newCartDrawer) {
+                    if (oldCartDrawer) {
+                      oldCartDrawer.replaceWith(newCartDrawer);
+                    } else {
+                      document.body.appendChild(newCartDrawer);
+                    }
+
+                    // Re-run any inline scripts in the drawer
+                    newCartDrawer.querySelectorAll('script').forEach((script) => {
+                      const newScript = document.createElement('script');
+                      if (script.src) {
+                        newScript.src = script.src;
+                        newScript.async = false;
+                      } else {
+                        newScript.textContent = script.textContent;
+                      }
+                      document.body.appendChild(newScript).remove();
+                    });
+
+                    // Open the drawer
+                    const cartDrawer = document.querySelector('cart-drawer');
+                    if (cartDrawer && typeof cartDrawer.open === 'function') {
+                      cartDrawer.open();
+                    } else {
+                      document.documentElement.classList.add('cart--open');
+                    }
+                  }
+                  updateCartCount();
+                });
+
+              // Close the Quick View modal if open
+              const quickViewModal = document.querySelector('.rvp-quick-view-modal-wrapper');
+              if (quickViewModal) {
+                quickViewModal.remove();
+                document.body.style.overflow = ''; // Restore body scroll
+              }
+
               setTimeout(() => {
                 buttonSpan.textContent = originalText;
                 button.disabled = false;
+                button.dataset.addingToCart = 'false'; // Reset the flag
+              }, 2000);
+            })
+            .catch((error) => {
+              console.error('Error adding item to cart:', error);
+              buttonSpan.textContent = 'Error';
+              setTimeout(() => {
+                buttonSpan.textContent = originalText;
+                button.disabled = false;
+                button.dataset.addingToCart = 'false'; // Reset the flag
               }, 2000);
             });
-          }
         } catch (error) {
           console.error('Error parsing product data:', error);
         }
@@ -250,7 +339,7 @@
                 </span>
                 </div>
                 `
-                : ''
+                    : ''
                 }
                  <a href="${productHandle}" target="_blank" class="rvp-view-details">view full details</a>
 
@@ -401,70 +490,67 @@
       } else {
         buttonSpan.textContent = actionType === 'reorder' || actionType === 'buy-now' ? 'Processing...' : 'Adding...';
       }
-
       fetch('/cart/add.js', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: variantId, quantity }),
+        body: JSON.stringify({ id: variantId, quantity: qtyInput.value }),
       })
-        .then((response) => {
-          if (!response.ok) throw new Error('Network response was not ok');
-          return response.json();
-        })
-        .then((data) => {
-          // Optionally close modal here if you want
-          modal.remove();
-          modalWrapper.remove();
-          document.body.style.overflow = '';
+        .then(() => {
+          // Update and open the cart drawer
+          fetch('?section_id=cart-drawer')
+            .then((response) => response.text())
+            .then((text) => {
+              const html = new DOMParser().parseFromString(text, 'text/html');
+              const newCartDrawer = html.querySelector('cart-drawer');
+              const oldCartDrawer = document.querySelector('cart-drawer');
 
-          if (actionType === 'reorder' || actionType === 'buy-now') {
-            window.location.href = '/checkout';
-          } else {
-            const desktopCartCheckbox = document.getElementById('minicart__button--header--default');
-            const mobileCartCheckbox = document.getElementById('minicart__button--header--default-mobile');
-            if (desktopCartCheckbox) desktopCartCheckbox.checked = true;
-            if (mobileCartCheckbox) mobileCartCheckbox.checked = true;
+              if (newCartDrawer) {
+                if (oldCartDrawer) {
+                  oldCartDrawer.replaceWith(newCartDrawer);
+                } else {
+                  document.body.appendChild(newCartDrawer);
+                }
 
-            setTimeout(() => {
-              if (buttonSpan.classList && buttonSpan.classList.contains('rvp-add-to-cart-text')) {
-                buttonSpan.textContent = originalText;
-              } else {
-                buttonSpan.textContent = originalText;
+                // Re-run any inline scripts in the drawer
+                newCartDrawer.querySelectorAll('script').forEach((script) => {
+                  const newScript = document.createElement('script');
+                  if (script.src) {
+                    newScript.src = script.src;
+                    newScript.async = false;
+                  } else {
+                    newScript.textContent = script.textContent;
+                  }
+                  document.body.appendChild(newScript).remove();
+                });
+
+                // Open the drawer
+                const cartDrawer = document.querySelector('cart-drawer');
+                if (cartDrawer && typeof cartDrawer.open === 'function') {
+                  cartDrawer.open();
+                } else {
+                  document.documentElement.classList.add('cart--open');
+                }
               }
-              button.disabled = false;
-            }, 2000);
+              updateCartCount();
+            });
+
+          // Close the Quick View modal
+          const quickViewModal = document.querySelector('.rvp-quick-view-modal-wrapper');
+          if (quickViewModal) {
+            quickViewModal.remove();
+            document.body.style.overflow = ''; // Restore body scroll
           }
 
-          // Update product title to reflect selected variant
-          const productTitleEl = modal.querySelector('.rvp-quick-view-product-title');
-          if (productTitleEl && matchedVariant) {
-            let baseTitle = product.title;
-            // If the product title ends with the first variant's title, remove it
-            const firstVariantTitle = product.variants[0]?.title;
-            if (
-              firstVariantTitle &&
-              firstVariantTitle !== 'Default Title' &&
-              baseTitle.endsWith(' - ' + firstVariantTitle)
-            ) {
-              baseTitle = baseTitle.slice(0, -(' - ' + firstVariantTitle).length);
-            }
-            const formattedVariantTitle = formatVariantTitle(matchedVariant.title);
-            if (formattedVariantTitle && formattedVariantTitle !== 'Default Title') {
-              productTitleEl.textContent = baseTitle + ' - ' + formattedVariantTitle;
-            } else {
-              productTitleEl.textContent = baseTitle;
-            }
-          }
+          setTimeout(() => {
+            buttonSpan.textContent = originalText;
+            button.disabled = false;
+          }, 2000);
         })
         .catch((error) => {
-          console.error('Add to cart error:', error);
+          console.error('Error adding item to cart:', error);
           buttonSpan.textContent = 'Error';
           setTimeout(() => {
-            if (buttonSpan.classList && buttonSpan.classList.contains('rvp-add-to-cart-text')) {
-              buttonSpan.textContent = originalText;
-            } else {
-              buttonSpan.textContent = originalText;
-            }
+            buttonSpan.textContent = originalText;
             button.disabled = false;
           }, 2000);
         });
@@ -669,5 +755,27 @@
       }
     }
     return starsHtml;
+  }
+
+  function updateCartCount() {
+    fetch('/cart.js')
+      .then((response) => response.json())
+      .then((cart) => {
+        const cartCountBubble = document.querySelector('#cart-icon-bubble .cart-count-bubble span[aria-hidden="true"]');
+        const cartCountVisuallyHidden = document.querySelector('#cart-icon-bubble .cart-count-bubble .visually-hidden');
+
+        if (cartCountBubble && cartCountVisuallyHidden) {
+          const itemCount = cart.item_count || 0;
+
+          // Update the visible cart count
+          cartCountBubble.textContent = itemCount;
+
+          // Update the visually hidden cart count for accessibility
+          cartCountVisuallyHidden.textContent = `${itemCount} items`;
+        }
+      })
+      .catch((error) => {
+        console.error('Error updating cart count:', error);
+      });
   }
 </script>
