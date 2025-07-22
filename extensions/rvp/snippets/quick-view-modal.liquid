@@ -33,51 +33,6 @@
 </script>
 
 <script>
-  function fetchCartDrawer() {
-    fetch('?section_id=cart-drawer')
-      .then((res) => res.text())
-      .then((html) => {
-        const parser = new DOMParser();
-        const parsedDoc = parser.parseFromString(html, 'text/html');
-        const newDrawer = parsedDoc.querySelector('#CartDrawer');
-
-        if (!newDrawer) {
-          console.warn('CartDrawer not found in section response.');
-          return;
-        }
-
-        const currentDrawer = document.querySelector('#CartDrawer');
-
-        if (currentDrawer) {
-          currentDrawer.innerHTML = newDrawer.innerHTML;
-        } else {
-          document.body.appendChild(newDrawer);
-        }
-
-        // Open minicart
-        document.documentElement.classList.add('cart--open');
-
-        // Reinitialize scripts if needed (optional)
-        reinitializeCartDrawerEvents(newDrawer);
-      })
-      .catch((error) => {
-        console.error('Cart drawer fetch failed:', error);
-      });
-  }
-
-  function reinitializeCartDrawerEvents(drawer) {
-    const scripts = drawer.querySelectorAll('script');
-    scripts.forEach((oldScript) => {
-      const newScript = document.createElement('script');
-      if (oldScript.src) {
-        newScript.src = oldScript.src;
-      } else {
-        newScript.textContent = oldScript.textContent;
-      }
-      document.body.appendChild(newScript);
-    });
-  }
-
   // Add event listener for Quick View button
   document.body.addEventListener('click', function (event) {
     if (event.target.closest('.quick-view-btn')) {
@@ -761,17 +716,33 @@
     fetch('/cart.js')
       .then((response) => response.json())
       .then((cart) => {
-        const cartCountBubble = document.querySelector('#cart-icon-bubble .cart-count-bubble span[aria-hidden="true"]');
-        const cartCountVisuallyHidden = document.querySelector('#cart-icon-bubble .cart-count-bubble .visually-hidden');
+        const cartIconBubble = document.querySelector('#cart-icon-bubble');
+        const cartCountBubble = cartIconBubble.querySelector('.cart-count-bubble');
+        const itemCount = cart.item_count || 0; // Default to 0 if undefined
 
-        if (cartCountBubble && cartCountVisuallyHidden) {
-          const itemCount = cart.item_count || 0;
+        // If the cart-count-bubble does not exist, create it
+        if (!cartCountBubble && itemCount > 0) {
+          const newCartCountBubble = document.createElement('div');
+          newCartCountBubble.className = 'cart-count-bubble';
+          newCartCountBubble.innerHTML = `
+          <span aria-hidden="true">${itemCount}</span>
+          <span class="visually-hidden">${itemCount} item${itemCount > 1 ? 's' : ''}</span>
+        `;
+          cartIconBubble.appendChild(newCartCountBubble);
 
-          // Update the visible cart count
-          cartCountBubble.textContent = itemCount;
-
-          // Update the visually hidden cart count for accessibility
-          cartCountVisuallyHidden.textContent = `${itemCount} items`;
+          // Update the cart icon SVG to the "filled" version
+          const cartIconSvg = cartIconBubble.querySelector('svg');
+          cartIconSvg.classList.remove('icon-cart-empty');
+          cartIconSvg.classList.add('icon-cart');
+          cartIconSvg.innerHTML = `
+          <path fill="currentColor" fill-rule="evenodd" d="M20.5 6.5a4.75 4.75 0 00-4.75 4.75v.56h-3.16l-.77 11.6a5 5 0 004.99 5.34h7.38a5 5 0 004.99-5.33l-.77-11.6h-3.16v-.57A4.75 4.75 0 0020.5 6.5zm3.75 5.31v-.56a3.75 3.75 0 10-7.5 0v.56h7.5zm-7.5 1h7.5v.56a3.75 3.75 0 11-7.5 0v-.56zm-1 0v.56a4.75 4.75 0 109.5 0v-.56h2.22l.71 10.67a4 4 0 01-3.99 4.27h-7.38a4 4 0 01-4-4.27l.72-10.67h2.22z"></path>
+        `;
+        } else if (cartCountBubble) {
+          // Update the existing cart-count-bubble
+          cartCountBubble.querySelector('span[aria-hidden="true"]').textContent = itemCount;
+          cartCountBubble.querySelector('.visually-hidden').textContent = `${itemCount} item${
+            itemCount > 1 ? 's' : ''
+          }`;
         }
       })
       .catch((error) => {
