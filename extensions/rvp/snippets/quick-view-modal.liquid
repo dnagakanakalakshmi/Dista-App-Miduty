@@ -434,6 +434,7 @@
       // selectedOptions is already defined and updated when buttons are clicked
 
       // Find the matching variant
+      const button = modal.querySelector('.rvp-add-to-cart-button');
       const matchedVariant =
         (product.variants || []).find((variant) => {
           if (!variant.selectedOptions) return false;
@@ -457,8 +458,6 @@
         });
         return; // Exit early to prevent further execution
       }
-
-      const button = modal.querySelector('.rvp-add-to-cart-button');
 
       const buttonSpan = button.querySelector('.rvp-add-to-cart-text') || button;
       const originalText = buttonSpan.textContent;
