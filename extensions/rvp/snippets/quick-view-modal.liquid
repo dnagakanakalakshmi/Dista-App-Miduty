@@ -67,73 +67,83 @@
           if (button.dataset.addingToCart === 'true') return;
           button.dataset.addingToCart = 'true';
 
-          // Add to cart
-          fetch('/cart/add.js', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: variantId, quantity: 1 }),
-          })
-            .then(() => {
-              // Update and open the cart drawer
-              fetch('?section_id=cart-drawer')
-                .then((response) => response.text())
-                .then((text) => {
-                  const html = new DOMParser().parseFromString(text, 'text/html');
-                  const newCartDrawer = html.querySelector('cart-drawer');
-                  const oldCartDrawer = document.querySelector('cart-drawer');
-
-                  if (newCartDrawer) {
-                    if (oldCartDrawer) {
-                      oldCartDrawer.replaceWith(newCartDrawer);
-                    } else {
-                      document.body.appendChild(newCartDrawer);
-                    }
-
-                    // Re-run any inline scripts in the drawer
-                    newCartDrawer.querySelectorAll('script').forEach((script) => {
-                      const newScript = document.createElement('script');
-                      if (script.src) {
-                        newScript.src = script.src;
-                        newScript.async = false;
-                      } else {
-                        newScript.textContent = script.textContent;
-                      }
-                      document.body.appendChild(newScript).remove();
-                    });
-
-                    // Open the drawer
-                    const cartDrawer = document.querySelector('cart-drawer');
-                    if (cartDrawer && typeof cartDrawer.open === 'function') {
-                      cartDrawer.open();
-                    } else {
-                      document.documentElement.classList.add('cart--open');
-                    }
-                  }
-                  updateCartCount();
-                });
-
-              // Close the Quick View modal if open
-              const quickViewModal = document.querySelector('.rvp-quick-view-modal-wrapper');
-              if (quickViewModal) {
-                quickViewModal.remove();
-                document.body.style.overflow = ''; // Restore body scroll
-              }
-
-              setTimeout(() => {
-                buttonSpan.textContent = originalText;
-                button.disabled = false;
-                button.dataset.addingToCart = 'false'; // Reset the flag
-              }, 2000);
-            })
-            .catch((error) => {
-              console.error('Error adding item to cart:', error);
-              buttonSpan.textContent = 'Error';
-              setTimeout(() => {
-                buttonSpan.textContent = originalText;
-                button.disabled = false;
-                button.dataset.addingToCart = 'false'; // Reset the flag
-              }, 2000);
+          if (actionType === 'reorder' || actionType === 'buy-now') {
+            fetch('/cart/add.js', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: variantId, quantity: 1 }),
+            }).then(() => {
+              window.location.href = '/checkout';
             });
+          } else {
+            // Add to cart
+            fetch('/cart/add.js', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: variantId, quantity: 1 }),
+            })
+              .then(() => {
+                // Update and open the cart drawer
+                fetch('?section_id=cart-drawer')
+                  .then((response) => response.text())
+                  .then((text) => {
+                    const html = new DOMParser().parseFromString(text, 'text/html');
+                    const newCartDrawer = html.querySelector('cart-drawer');
+                    const oldCartDrawer = document.querySelector('cart-drawer');
+
+                    if (newCartDrawer) {
+                      if (oldCartDrawer) {
+                        oldCartDrawer.replaceWith(newCartDrawer);
+                      } else {
+                        document.body.appendChild(newCartDrawer);
+                      }
+
+                      // Re-run any inline scripts in the drawer
+                      newCartDrawer.querySelectorAll('script').forEach((script) => {
+                        const newScript = document.createElement('script');
+                        if (script.src) {
+                          newScript.src = script.src;
+                          newScript.async = false;
+                        } else {
+                          newScript.textContent = script.textContent;
+                        }
+                        document.body.appendChild(newScript).remove();
+                      });
+
+                      // Open the drawer
+                      const cartDrawer = document.querySelector('cart-drawer');
+                      if (cartDrawer && typeof cartDrawer.open === 'function') {
+                        cartDrawer.open();
+                      } else {
+                        document.documentElement.classList.add('cart--open');
+                      }
+                    }
+                    updateCartCount();
+                  });
+
+                // Close the Quick View modal if open
+                const quickViewModal = document.querySelector('.rvp-quick-view-modal-wrapper');
+                if (quickViewModal) {
+                  quickViewModal.remove();
+                  document.body.style.overflow = ''; // Restore body scroll
+                }
+
+                setTimeout(() => {
+                  buttonSpan.textContent = originalText;
+                  button.disabled = false;
+                  button.dataset.addingToCart = 'false'; // Reset the flag
+                }, 2000);
+              })
+              .catch((error) => {
+                console.error('Error adding item to cart:', error);
+                buttonSpan.textContent = 'Error';
+                setTimeout(() => {
+                  buttonSpan.textContent = originalText;
+                  button.disabled = false;
+                  button.dataset.addingToCart = 'false'; // Reset the flag
+                }, 2000);
+              });
+          }
         } catch (error) {
           console.error('Error parsing product data:', error);
         }
@@ -434,8 +444,21 @@
 
       const variantId = matchedVariant.id ? matchedVariant.id.split('/').pop() : null;
       const quantity = parseInt(qtyInput.value, 10) || 1;
-      const button = modal.querySelector('.rvp-add-to-cart-button');
       if (!variantId || !button) return;
+
+      // Handle reorder or buy-now actions
+      if (actionType === 'reorder' || actionType === 'buy-now') {
+        fetch('/cart/add.js', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: variantId, quantity }),
+        }).then(() => {
+          window.location.href = '/checkout'; // Redirect to checkout
+        });
+        return; // Exit early to prevent further execution
+      }
+
+      const button = modal.querySelector('.rvp-add-to-cart-button');
 
       const buttonSpan = button.querySelector('.rvp-add-to-cart-text') || button;
       const originalText = buttonSpan.textContent;
